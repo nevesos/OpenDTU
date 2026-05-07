@@ -1245,16 +1245,6 @@ export default defineComponent({
             this.backgroundHoverPoint = null;
             this.clearBackgroundPointDragListeners();
         },
-        backgroundSvgMarkup(): string {
-            const paths = this.backgroundPaths
-                .map(
-                    (path) =>
-                        `<path d="${this.pathData(path)}" stroke="${path.color}" stroke-width="${path.width}" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`
-                )
-                .join('');
-
-            return `<svg xmlns="http://www.w3.org/2000/svg" width="${this.canvasWidth}" height="${this.canvasHeight}" viewBox="0 0 ${this.canvasWidth} ${this.canvasHeight}">${paths}</svg>`;
-        },
         moduleStyle(key: string) {
             const position = this.positions[key] || { x: 0, y: 0 };
             return {
