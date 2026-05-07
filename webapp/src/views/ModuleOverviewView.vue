@@ -29,6 +29,7 @@
                 <select v-model="heatmapMode" class="form-select form-select-sm module-overview-select">
                     <option value="none">{{ $t('moduleoverview.HeatmapNone') }}</option>
                     <option value="power">{{ $t('moduleoverview.HeatmapPower') }}</option>
+                    <option value="powerMax">{{ $t('moduleoverview.HeatmapPowerMax') }}</option>
                     <option value="yieldDay">{{ $t('moduleoverview.HeatmapYieldDay') }}</option>
                 </select>
                 <div class="btn-group" role="group">
@@ -107,6 +108,7 @@ interface ModuleItem {
     pollEnabled: boolean;
     reachable: boolean;
     producing: boolean;
+    powerMaximum: number;
     Power?: ValueObject;
     Voltage?: ValueObject;
     Current?: ValueObject;
@@ -128,7 +130,7 @@ export default defineComponent({
             isWebsocketConnected: false,
             editMode: false,
             showDisabledModules: false,
-            heatmapMode: 'none' as 'none' | 'power' | 'yieldDay',
+            heatmapMode: 'none' as 'none' | 'power' | 'powerMax' | 'yieldDay',
             positions: {} as Record<string, ModulePosition>,
             dragState: null as
                 | {
@@ -157,6 +159,8 @@ export default defineComponent({
                 .sort((a: Inverter, b: Inverter) => a.order - b.order)
                 .forEach((inverter: Inverter) => {
                     const dcChannels = Object.entries(inverter.DC || {}) as [string, InverterStatistics][];
+                    const fallbackPowerMaximum =
+                        inverter.limit_absolute > 0 && dcChannels.length > 0 ? inverter.limit_absolute / dcChannels.length : 0;
 
                     dcChannels
                         .sort(([a], [b]) => Number(a) - Number(b))
@@ -175,6 +179,7 @@ export default defineComponent({
                                 pollEnabled: inverter.poll_enabled,
                                 reachable: inverter.reachable,
                                 producing: inverter.producing,
+                                powerMaximum: channelData.Power?.max ?? fallbackPowerMaximum,
                                 Power: channelData.Power,
                                 Voltage: channelData.Voltage,
                                 Current: channelData.Current,
@@ -199,7 +204,7 @@ export default defineComponent({
             return this.visibleModules.filter((module) => module.pollEnabled && !module.reachable).length;
         },
         heatmapMaximum(): number {
-            if (this.heatmapMode === 'none') {
+            if (this.heatmapMode === 'none' || this.heatmapMode === 'powerMax') {
                 return 0;
             }
 
@@ -393,7 +398,7 @@ export default defineComponent({
             };
         },
         heatmapValue(module: ModuleItem): number {
-            if (this.heatmapMode === 'power') {
+            if (this.heatmapMode === 'power' || this.heatmapMode === 'powerMax') {
                 return module.Power?.v ?? 0;
             }
 
@@ -404,12 +409,17 @@ export default defineComponent({
             return 0;
         },
         heatmapStyle(module: ModuleItem) {
-            if (this.heatmapMode === 'none' || this.heatmapMaximum <= 0 || !module.pollEnabled) {
+            if (this.heatmapMode === 'none' || !module.pollEnabled) {
                 return {};
             }
 
             const value = Math.max(0, this.heatmapValue(module));
-            const ratio = Math.min(1, value / this.heatmapMaximum);
+            const maximum = this.heatmapMode === 'powerMax' ? module.powerMaximum : this.heatmapMaximum;
+            if (maximum <= 0) {
+                return {};
+            }
+
+            const ratio = Math.min(1, value / maximum);
             const hue = 210 - ratio * 150;
             const backgroundLightness = 96 - ratio * 24;
             const borderLightness = 58 - ratio * 18;
@@ -455,6 +465,7 @@ export default defineComponent({
                 `poll_enabled: ${module.pollEnabled}`,
                 `reachable: ${module.reachable}`,
                 `producing: ${module.producing}`,
+                `powerMaximum: ${module.powerMaximum}`,
                 `Power: ${this.debugValue(module.Power)}`,
                 `Voltage: ${this.debugValue(module.Voltage)}`,
                 `Current: ${this.debugValue(module.Current)}`,

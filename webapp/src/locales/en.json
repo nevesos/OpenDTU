@@ -62,6 +62,7 @@
         "ShowDisabled": "Show disabled",
         "HeatmapNone": "No heatmap",
         "HeatmapPower": "Heatmap: Power",
+        "HeatmapPowerMax": "Heatmap: Power / maximum",
         "HeatmapYieldDay": "Heatmap: Daily yield",
         "NoModules": "No module values found.",
         "Channel": "Channel {channel}"

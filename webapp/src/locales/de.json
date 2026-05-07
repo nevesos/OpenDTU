@@ -62,6 +62,7 @@
         "ShowDisabled": "Deaktivierte anzeigen",
         "HeatmapNone": "Keine Heatmap",
         "HeatmapPower": "Heatmap: Leistung",
+        "HeatmapPowerMax": "Heatmap: Leistung / Maximum",
         "HeatmapYieldDay": "Heatmap: Tagesertrag",
         "NoModules": "Keine Modulwerte gefunden.",
         "Channel": "Kanal {channel}"
