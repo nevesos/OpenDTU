@@ -33,6 +33,34 @@
                     <option value="yieldDay">{{ $t('moduleoverview.HeatmapYieldDay') }}</option>
                 </select>
                 <div class="btn-group" role="group">
+                    <button
+                        type="button"
+                        class="btn btn-outline-primary"
+                        :class="{ active: backgroundDrawMode }"
+                        :disabled="!editMode"
+                        @click="toggleBackgroundDrawMode"
+                    >
+                        <BIconBrush />&nbsp;{{ $t('moduleoverview.DrawBackground') }}
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary" :disabled="!editMode || backgroundPaths.length === 0" @click="undoBackgroundPath">
+                        <BIconArrowCounterclockwise />&nbsp;{{ $t('moduleoverview.Undo') }}
+                    </button>
+                    <button type="button" class="btn btn-outline-danger" :disabled="!editMode || backgroundPaths.length === 0" @click="clearBackground">
+                        <BIconTrash />&nbsp;{{ $t('moduleoverview.ClearBackground') }}
+                    </button>
+                </div>
+                <div class="d-flex align-items-center gap-2 module-overview-draw-tools" :class="{ invisible: !editMode }">
+                    <input v-model="backgroundStrokeColor" class="form-control form-control-color" type="color" :title="$t('moduleoverview.DrawColor')" />
+                    <input
+                        v-model.number="backgroundStrokeWidth"
+                        class="form-range module-overview-stroke-width"
+                        type="range"
+                        min="1"
+                        max="20"
+                        :title="$t('moduleoverview.DrawWidth')"
+                    />
+                </div>
+                <div class="btn-group" role="group">
                     <button type="button" class="btn btn-outline-primary" :class="{ active: editMode }" @click="toggleEditMode">
                         <BIconPencilSquare />&nbsp;{{ $t('moduleoverview.EditMode') }}
                     </button>
@@ -53,7 +81,56 @@
             class="module-overview-canvas"
             :class="{ 'module-overview-canvas-edit': editMode }"
         >
-            <div class="module-overview-grid"></div>
+            <div class="module-overview-grid" :style="{ width: `${canvasWidth}px`, height: `${canvasHeight}px` }"></div>
+            <svg
+                ref="backgroundSvg"
+                class="module-overview-background"
+                :class="{ 'module-overview-background-draw': editMode && backgroundDrawMode }"
+                :width="canvasWidth"
+                :height="canvasHeight"
+                :viewBox="`0 0 ${canvasWidth} ${canvasHeight}`"
+                @pointerdown="onBackgroundPointerDown"
+                @pointermove="onBackgroundPointerMove"
+                @pointerleave="onBackgroundPointerLeave"
+            >
+                <path
+                    v-for="path in backgroundPaths"
+                    :key="path.id"
+                    class="module-overview-background-path"
+                    :d="pathData(path)"
+                    :stroke="path.color"
+                    :stroke-width="path.width"
+                    fill="none"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    @pointerdown.stop="onBackgroundPathPointerDown($event, path.id)"
+                    @contextmenu.prevent="confirmDeleteBackgroundPath(path.id)"
+                />
+                <line
+                    v-if="backgroundPreviewLine !== null"
+                    class="module-overview-background-preview"
+                    :x1="backgroundPreviewLine.x1"
+                    :y1="backgroundPreviewLine.y1"
+                    :x2="backgroundPreviewLine.x2"
+                    :y2="backgroundPreviewLine.y2"
+                    :stroke="backgroundPreviewLine.color"
+                    :stroke-width="backgroundPreviewLine.width"
+                    stroke-linecap="round"
+                />
+                <template v-if="editMode && backgroundDrawMode">
+                    <circle
+                        v-for="point in backgroundControlPoints"
+                        :key="`${point.pathId}:${point.pointIndex}`"
+                        class="module-overview-background-point"
+                        :class="{ 'module-overview-background-point-active': point.pathId === activeBackgroundPathId }"
+                        :cx="point.x"
+                        :cy="point.y"
+                        r="5"
+                        @pointerdown.stop="onBackgroundPointPointerDown($event, point.pathId, point.pointIndex)"
+                        @contextmenu.prevent="confirmDeleteBackgroundPath(point.pathId)"
+                    />
+                </template>
+            </svg>
             <div
                 v-for="module in visibleModules"
                 :key="module.key"
@@ -87,7 +164,7 @@ import BootstrapAlert from '@/components/BootstrapAlert.vue';
 import type { Inverter, InverterStatistics, LiveData, ValueObject } from '@/types/LiveDataStatus';
 import { authHeader, authUrl, handleResponse } from '@/utils/authentication';
 import WebSocketService from '@/utils/websocketService';
-import { BIconGrid3x3Gap, BIconPencilSquare } from 'bootstrap-icons-vue';
+import { BIconArrowCounterclockwise, BIconBrush, BIconGrid3x3Gap, BIconPencilSquare, BIconTrash } from 'bootstrap-icons-vue';
 import { defineComponent } from 'vue';
 
 interface ModulePosition {
@@ -95,10 +172,39 @@ interface ModulePosition {
     y: number;
 }
 
+interface DrawingPoint {
+    x: number;
+    y: number;
+}
+
+interface BackgroundPath {
+    id: number;
+    color: string;
+    width: number;
+    points: DrawingPoint[];
+    closed: boolean;
+}
+
+interface BackgroundControlPoint extends DrawingPoint {
+    pathId: number;
+    pointIndex: number;
+}
+
+interface BackgroundPreviewLine {
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    color: string;
+    width: number;
+}
+
 const MODULE_WIDTH = 150;
 const MODULE_HEIGHT = 250;
 const MODULE_GAP = 18;
 const PLACEMENT_GRID_SIZE = 16;
+const CANVAS_MIN_WIDTH = 960;
+const CANVAS_MIN_HEIGHT = 640;
 
 interface ModuleItem {
     key: string;
@@ -118,9 +224,12 @@ interface ModuleItem {
 export default defineComponent({
     components: {
         BasePage,
+        BIconArrowCounterclockwise,
+        BIconBrush,
         BootstrapAlert,
         BIconGrid3x3Gap,
         BIconPencilSquare,
+        BIconTrash,
     },
     data() {
         return {
@@ -132,6 +241,23 @@ export default defineComponent({
             showDisabledModules: false,
             heatmapMode: 'none' as 'none' | 'power' | 'powerMax' | 'yieldDay',
             positions: {} as Record<string, ModulePosition>,
+            backgroundDrawMode: false,
+            backgroundStrokeColor: '#5b8def',
+            backgroundStrokeWidth: 4,
+            backgroundPaths: [] as BackgroundPath[],
+            backgroundPathSequence: 0,
+            activeBackgroundPathId: null as number | null,
+            backgroundHoverPoint: null as DrawingPoint | null,
+            backgroundPointDragState: null as
+                | {
+                      pointerId: number;
+                      pathId: number;
+                      pointIndex: number;
+                      startX: number;
+                      startY: number;
+                      moved: boolean;
+                  }
+                | null,
             dragState: null as
                 | {
                       key: string;
@@ -146,8 +272,13 @@ export default defineComponent({
         this.getInitialData();
         this.initSocket();
     },
+    mounted() {
+        window.addEventListener('keydown', this.onBackgroundKeyDown);
+    },
     unmounted() {
         this.clearDragListeners();
+        this.clearBackgroundPointDragListeners();
+        window.removeEventListener('keydown', this.onBackgroundKeyDown);
         this.socket?.close();
     },
     computed: {
@@ -209,6 +340,47 @@ export default defineComponent({
             }
 
             return Math.max(...this.visibleModules.map((module) => this.heatmapValue(module)), 0);
+        },
+        backgroundControlPoints(): BackgroundControlPoint[] {
+            return this.backgroundPaths.flatMap((path) =>
+                path.points.map((point, pointIndex) => ({
+                    ...point,
+                    pathId: path.id,
+                    pointIndex,
+                }))
+            );
+        },
+        backgroundPreviewLine(): BackgroundPreviewLine | null {
+            if (!this.editMode || !this.backgroundDrawMode || this.backgroundHoverPoint === null || this.backgroundPointDragState !== null) {
+                return null;
+            }
+
+            const activePath = this.backgroundPaths.find((path) => path.id === this.activeBackgroundPathId);
+            const lastPoint = activePath?.points[activePath.points.length - 1];
+            if (activePath === undefined || activePath.closed || lastPoint === undefined) {
+                return null;
+            }
+
+            return {
+                x1: lastPoint.x,
+                y1: lastPoint.y,
+                x2: this.backgroundHoverPoint.x,
+                y2: this.backgroundHoverPoint.y,
+                color: activePath.color,
+                width: activePath.width,
+            };
+        },
+        canvasWidth(): number {
+            const maxModuleX = Math.max(...Object.values(this.positions).map((position) => position.x + MODULE_WIDTH + MODULE_GAP), 0);
+            const maxPathX = Math.max(...this.backgroundPaths.flatMap((path) => path.points.map((point) => point.x + path.width + MODULE_GAP)), 0);
+
+            return Math.max(CANVAS_MIN_WIDTH, Math.ceil(maxModuleX), Math.ceil(maxPathX));
+        },
+        canvasHeight(): number {
+            const maxModuleY = Math.max(...Object.values(this.positions).map((position) => position.y + MODULE_HEIGHT + MODULE_GAP), 0);
+            const maxPathY = Math.max(...this.backgroundPaths.flatMap((path) => path.points.map((point) => point.y + path.width + MODULE_GAP)), 0);
+
+            return Math.max(CANVAS_MIN_HEIGHT, Math.ceil(maxModuleY), Math.ceil(maxPathY));
         },
     },
     methods: {
@@ -332,9 +504,25 @@ export default defineComponent({
         },
         toggleEditMode() {
             this.editMode = !this.editMode;
+            if (!this.editMode) {
+                this.backgroundDrawMode = false;
+                this.backgroundHoverPoint = null;
+                this.clearBackgroundPointDragListeners();
+            }
+        },
+        toggleBackgroundDrawMode() {
+            if (!this.editMode) {
+                return;
+            }
+
+            this.backgroundDrawMode = !this.backgroundDrawMode;
+            this.backgroundHoverPoint = null;
+            if (!this.backgroundDrawMode) {
+                this.clearBackgroundPointDragListeners();
+            }
         },
         onPointerDown(event: PointerEvent, key: string) {
-            if (!this.editMode) {
+            if (!this.editMode || this.backgroundDrawMode) {
                 return;
             }
 
@@ -389,6 +577,376 @@ export default defineComponent({
             window.removeEventListener('pointermove', this.onPointerMove);
             window.removeEventListener('pointerup', this.onPointerUp);
             window.removeEventListener('pointercancel', this.onPointerUp);
+        },
+        onBackgroundPointerDown(event: PointerEvent) {
+            if (!this.editMode || !this.backgroundDrawMode) {
+                return;
+            }
+
+            if (event.button !== 0) {
+                return;
+            }
+
+            event.preventDefault();
+            const point = this.backgroundPointerPosition(event);
+            this.backgroundHoverPoint = point;
+
+            const activePath = this.backgroundPaths.find((path) => path.id === this.activeBackgroundPathId);
+            if (
+                activePath === undefined ||
+                activePath.closed ||
+                activePath.color !== this.backgroundStrokeColor ||
+                activePath.width !== this.backgroundStrokeWidth
+            ) {
+                const pathId = this.backgroundPathSequence + 1;
+                this.backgroundPathSequence = pathId;
+                this.activeBackgroundPathId = pathId;
+                this.backgroundPaths = [
+                    ...this.backgroundPaths,
+                    {
+                        id: pathId,
+                        color: this.backgroundStrokeColor,
+                        width: this.backgroundStrokeWidth,
+                        points: [point],
+                        closed: false,
+                    },
+                ];
+                return;
+            }
+
+            this.backgroundPaths = this.backgroundPaths.map((path) => {
+                if (path.id !== activePath.id) {
+                    return path;
+                }
+
+                return {
+                    ...path,
+                    points: [...path.points, point],
+                };
+            });
+        },
+        onBackgroundPointerMove(event: PointerEvent) {
+            if (!this.editMode || !this.backgroundDrawMode) {
+                return;
+            }
+
+            this.backgroundHoverPoint = this.backgroundPointerPosition(event);
+        },
+        onBackgroundPointerLeave() {
+            if (this.backgroundPointDragState === null) {
+                this.backgroundHoverPoint = null;
+            }
+        },
+        onBackgroundPathPointerDown(event: PointerEvent, pathId: number) {
+            if (!this.editMode || !this.backgroundDrawMode || event.button !== 0) {
+                return;
+            }
+
+            event.preventDefault();
+            const point = this.backgroundPointerPosition(event);
+            this.insertBackgroundPointOnPath(pathId, point);
+            this.backgroundHoverPoint = point;
+        },
+        onBackgroundPointPointerDown(event: PointerEvent, pathId: number, pointIndex: number) {
+            if (!this.editMode || !this.backgroundDrawMode) {
+                return;
+            }
+
+            if (event.button !== 0) {
+                return;
+            }
+
+            event.preventDefault();
+            this.clearBackgroundPointDragListeners();
+            this.activeBackgroundPathId = pathId;
+            const point = this.backgroundPointerPosition(event);
+            this.backgroundPointDragState = {
+                pointerId: event.pointerId,
+                pathId,
+                pointIndex,
+                startX: point.x,
+                startY: point.y,
+                moved: false,
+            };
+            this.backgroundHoverPoint = point;
+
+            (event.currentTarget as SVGCircleElement).setPointerCapture(event.pointerId);
+            window.addEventListener('pointermove', this.onBackgroundPointPointerMove);
+            window.addEventListener('pointerup', this.onBackgroundPointPointerUp);
+            window.addEventListener('pointercancel', this.onBackgroundPointPointerUp);
+        },
+        onBackgroundPointPointerMove(event: PointerEvent) {
+            if (!this.backgroundPointDragState || event.pointerId !== this.backgroundPointDragState.pointerId) {
+                return;
+            }
+
+            const point = this.backgroundPointerPosition(event);
+            this.backgroundHoverPoint = point;
+            const moved =
+                this.backgroundPointDragState.moved ||
+                Math.hypot(point.x - this.backgroundPointDragState.startX, point.y - this.backgroundPointDragState.startY) > 3;
+            this.backgroundPointDragState = {
+                ...this.backgroundPointDragState,
+                moved,
+            };
+            this.backgroundPaths = this.backgroundPaths.map((path) => {
+                if (path.id !== this.backgroundPointDragState?.pathId) {
+                    return path;
+                }
+
+                return {
+                    ...path,
+                    points: path.points.map((existingPoint, pointIndex) =>
+                        pointIndex === this.backgroundPointDragState?.pointIndex ? point : existingPoint
+                    ),
+                };
+            });
+        },
+        onBackgroundPointPointerUp(event: PointerEvent) {
+            if (!this.backgroundPointDragState || event.pointerId !== this.backgroundPointDragState.pointerId) {
+                return;
+            }
+
+            const dragState = this.backgroundPointDragState;
+            const point = this.backgroundPointerPosition(event);
+            if (!dragState.moved) {
+                this.closeBackgroundPathAtPoint(dragState.pathId, dragState.pointIndex);
+            } else {
+                const closingPointIndex = this.findBackgroundClosingPointIndex(dragState.pathId, dragState.pointIndex, point);
+                if (closingPointIndex !== null) {
+                    this.closeBackgroundPathAtPoint(dragState.pathId, closingPointIndex, true);
+                }
+            }
+
+            this.backgroundPointDragState = null;
+            this.clearBackgroundPointDragListeners();
+        },
+        clearBackgroundPointDragListeners() {
+            window.removeEventListener('pointermove', this.onBackgroundPointPointerMove);
+            window.removeEventListener('pointerup', this.onBackgroundPointPointerUp);
+            window.removeEventListener('pointercancel', this.onBackgroundPointPointerUp);
+        },
+        onBackgroundKeyDown(event: KeyboardEvent) {
+            if (event.key !== 'Escape' || !this.editMode || !this.backgroundDrawMode) {
+                return;
+            }
+
+            event.preventDefault();
+            this.activeBackgroundPathId = null;
+            this.backgroundHoverPoint = null;
+            this.backgroundPointDragState = null;
+            this.clearBackgroundPointDragListeners();
+        },
+        closeBackgroundPathAtPoint(pathId: number, pointIndex: number, replaceLastPoint: boolean = false) {
+            const path = this.backgroundPaths.find((backgroundPath) => backgroundPath.id === pathId);
+            if (
+                path === undefined ||
+                path.closed ||
+                path.id !== this.activeBackgroundPathId ||
+                path.points.length < 2 ||
+                pointIndex === path.points.length - 1
+            ) {
+                return;
+            }
+
+            const closingPoint = path.points[pointIndex];
+            if (closingPoint === undefined) {
+                return;
+            }
+
+            this.backgroundPaths = this.backgroundPaths.map((backgroundPath) => {
+                if (backgroundPath.id !== path.id) {
+                    return backgroundPath;
+                }
+
+                return {
+                    ...backgroundPath,
+                    points: replaceLastPoint
+                        ? [...backgroundPath.points.slice(0, -1), { ...closingPoint }]
+                        : [...backgroundPath.points, { ...closingPoint }],
+                    closed: true,
+                };
+            });
+            this.activeBackgroundPathId = null;
+            this.backgroundHoverPoint = null;
+        },
+        findBackgroundClosingPointIndex(pathId: number, movedPointIndex: number, point: DrawingPoint): number | null {
+            const path = this.backgroundPaths.find((backgroundPath) => backgroundPath.id === pathId);
+            if (
+                path === undefined ||
+                path.closed ||
+                path.id !== this.activeBackgroundPathId ||
+                movedPointIndex !== path.points.length - 1 ||
+                path.points.length < 3
+            ) {
+                return null;
+            }
+
+            const closingPointIndex = path.points.findIndex((existingPoint, pointIndex) => {
+                if (pointIndex === movedPointIndex) {
+                    return false;
+                }
+
+                return Math.hypot(point.x - existingPoint.x, point.y - existingPoint.y) <= 8;
+            });
+
+            return closingPointIndex === -1 ? null : closingPointIndex;
+        },
+        insertBackgroundPointOnPath(pathId: number, point: DrawingPoint) {
+            const path = this.backgroundPaths.find((backgroundPath) => backgroundPath.id === pathId);
+            if (path === undefined || path.points.length < 2) {
+                return;
+            }
+
+            const insertAfterPointIndex = this.findNearestBackgroundSegmentStartIndex(path, point);
+            if (insertAfterPointIndex === null) {
+                return;
+            }
+
+            this.backgroundPaths = this.backgroundPaths.map((backgroundPath) => {
+                if (backgroundPath.id !== path.id) {
+                    return backgroundPath;
+                }
+
+                return {
+                    ...backgroundPath,
+                    points: [
+                        ...backgroundPath.points.slice(0, insertAfterPointIndex + 1),
+                        point,
+                        ...backgroundPath.points.slice(insertAfterPointIndex + 1),
+                    ],
+                };
+            });
+            this.activeBackgroundPathId = path.closed ? null : path.id;
+        },
+        findNearestBackgroundSegmentStartIndex(path: BackgroundPath, point: DrawingPoint): number | null {
+            let nearestSegmentStartIndex: number | null = null;
+            let nearestDistance = Number.POSITIVE_INFINITY;
+
+            for (let pointIndex = 0; pointIndex < path.points.length - 1; pointIndex += 1) {
+                const startPoint = path.points[pointIndex];
+                const endPoint = path.points[pointIndex + 1];
+                if (startPoint === undefined || endPoint === undefined) {
+                    continue;
+                }
+
+                const distance = this.distanceToSegment(point, startPoint, endPoint);
+                if (distance < nearestDistance) {
+                    nearestDistance = distance;
+                    nearestSegmentStartIndex = pointIndex;
+                }
+            }
+
+            const hitTolerance = Math.max(8, path.width + 4);
+            return nearestDistance <= hitTolerance ? nearestSegmentStartIndex : null;
+        },
+        distanceToSegment(point: DrawingPoint, startPoint: DrawingPoint, endPoint: DrawingPoint): number {
+            const deltaX = endPoint.x - startPoint.x;
+            const deltaY = endPoint.y - startPoint.y;
+            const lengthSquared = deltaX * deltaX + deltaY * deltaY;
+            if (lengthSquared === 0) {
+                return Math.hypot(point.x - startPoint.x, point.y - startPoint.y);
+            }
+
+            const projection = Math.max(0, Math.min(1, ((point.x - startPoint.x) * deltaX + (point.y - startPoint.y) * deltaY) / lengthSquared));
+            const projectedX = startPoint.x + projection * deltaX;
+            const projectedY = startPoint.y + projection * deltaY;
+
+            return Math.hypot(point.x - projectedX, point.y - projectedY);
+        },
+        deleteBackgroundPath(pathId: number) {
+            this.backgroundPaths = this.backgroundPaths.filter((path) => path.id !== pathId);
+            if (this.activeBackgroundPathId === pathId) {
+                this.activeBackgroundPathId = null;
+                this.backgroundHoverPoint = null;
+            }
+        },
+        confirmDeleteBackgroundPath(pathId: number) {
+            if (window.confirm(this.$t('moduleoverview.ConfirmDeleteShape'))) {
+                this.deleteBackgroundPath(pathId);
+            }
+        },
+        backgroundPointerPosition(event: PointerEvent): DrawingPoint {
+            const canvas = this.$refs.canvas as HTMLElement;
+            const rect = canvas.getBoundingClientRect();
+
+            return {
+                x: Math.max(0, Math.round(event.clientX - rect.left + canvas.scrollLeft)),
+                y: Math.max(0, Math.round(event.clientY - rect.top + canvas.scrollTop)),
+            };
+        },
+        pathData(path: BackgroundPath): string {
+            const { points } = path;
+            if (points.length === 0) {
+                return '';
+            }
+
+            const firstPoint = points[0];
+            if (firstPoint === undefined) {
+                return '';
+            }
+
+            const commands = [`M ${firstPoint.x} ${firstPoint.y}`, ...points.slice(1).map((point) => `L ${point.x} ${point.y}`)];
+            return path.closed && this.isSamePoint(firstPoint, points[points.length - 1]) ? `${commands.join(' ')} Z` : commands.join(' ');
+        },
+        isSamePoint(firstPoint: DrawingPoint, secondPoint?: DrawingPoint): boolean {
+            return secondPoint !== undefined && firstPoint.x === secondPoint.x && firstPoint.y === secondPoint.y;
+        },
+        undoBackgroundPath() {
+            const activePath = this.backgroundPaths.find((path) => path.id === this.activeBackgroundPathId);
+            if (activePath === undefined) {
+                this.backgroundPaths = this.backgroundPaths.slice(0, -1);
+                this.activeBackgroundPathId = this.backgroundPaths[this.backgroundPaths.length - 1]?.id ?? null;
+                return;
+            }
+
+            if (activePath.closed) {
+                this.backgroundPaths = this.backgroundPaths.map((path) => {
+                    if (path.id !== activePath.id) {
+                        return path;
+                    }
+
+                    return {
+                        ...path,
+                        closed: false,
+                    };
+                });
+                return;
+            }
+
+            if (activePath.points.length <= 1) {
+                this.backgroundPaths = this.backgroundPaths.filter((path) => path.id !== activePath.id);
+                this.activeBackgroundPathId = this.backgroundPaths[this.backgroundPaths.length - 1]?.id ?? null;
+                return;
+            }
+
+            this.backgroundPaths = this.backgroundPaths.map((path) => {
+                if (path.id !== activePath.id) {
+                    return path;
+                }
+
+                return {
+                    ...path,
+                    points: path.points.slice(0, -1),
+                };
+            });
+        },
+        clearBackground() {
+            this.backgroundPaths = [];
+            this.backgroundPathSequence = 0;
+            this.activeBackgroundPathId = null;
+            this.backgroundHoverPoint = null;
+            this.clearBackgroundPointDragListeners();
+        },
+        backgroundSvgMarkup(): string {
+            const paths = this.backgroundPaths
+                .map(
+                    (path) =>
+                        `<path d="${this.pathData(path)}" stroke="${path.color}" stroke-width="${path.width}" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`
+                )
+                .join('');
+
+            return `<svg xmlns="http://www.w3.org/2000/svg" width="${this.canvasWidth}" height="${this.canvasHeight}" viewBox="0 0 ${this.canvasWidth} ${this.canvasHeight}">${paths}</svg>`;
         },
         moduleStyle(key: string) {
             const position = this.positions[key] || { x: 0, y: 0 };
@@ -501,6 +1059,14 @@ export default defineComponent({
     width: auto;
 }
 
+.module-overview-draw-tools {
+    min-width: 150px;
+}
+
+.module-overview-stroke-width {
+    width: 90px;
+}
+
 .module-overview-grid {
     position: absolute;
     inset: 0;
@@ -513,8 +1079,38 @@ export default defineComponent({
     opacity: 0.55;
 }
 
+.module-overview-background {
+    position: absolute;
+    top: 0;
+    left: 0;
+    pointer-events: none;
+}
+
+.module-overview-background-draw {
+    pointer-events: auto;
+    cursor: crosshair;
+}
+
+.module-overview-background-preview {
+    opacity: 0.55;
+    pointer-events: none;
+}
+
+.module-overview-background-point {
+    fill: var(--bs-body-bg);
+    stroke: var(--bs-primary);
+    stroke-width: 2;
+    cursor: move;
+}
+
+.module-overview-background-point-active {
+    fill: var(--bs-primary);
+    stroke: var(--bs-body-bg);
+}
+
 .module-card {
     position: absolute;
+    z-index: 1;
     width: 150px;
     height: 250px;
     padding: 0.65rem;

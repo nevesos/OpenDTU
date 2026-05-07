@@ -136,6 +136,157 @@ Feature_UIModuleOverview
 
 Der Arbeitsbaum war vor dieser Notiz sauber. Es gab zu diesem Zeitpunkt keine lokalen Feature-Aenderungen zum Committen.
 
+## Aktueller Implementierungsstand
+
+Stand nach erstem UI-Entwurf:
+
+- Neue View vorhanden: `webapp/src/views/ModuleOverviewView.vue`
+- Neue Route vorhanden: `/module-overview`
+- Menueeintrag neben `Live-Ansicht` vorhanden.
+- Locale-Texte in `de.json`, `en.json`, `fr.json` ergaenzt.
+- Keine Firmware-Aenderungen.
+- Keine Persistenz implementiert.
+- Keine Datei-API-Aufrufe fuer `module_overview.json`.
+
+Die Moduluebersicht nutzt:
+
+- Initial `GET /api/livedata/status`
+- Danach WebSocket `/livedata`
+- Modul-Key: `${serial}:DC:${channel}`
+
+Die Module werden aus `inverters[].DC` erzeugt. Wichtiges Datenformat-Finding:
+
+- `GET /api/livedata/status` lieferte beim Test zunaechst nur Wechselrichter-Metadaten und `total`, aber keine `DC`-Daten.
+- Die `DC`-Daten kamen ueber WebSocket.
+- `DC` kommt in den Live-Daten als Objekt mit numerischen String-Keys, z. B. `"0"`, `"1"`, `"2"`, `"3"`, nicht zwingend als echtes Array.
+- Die View nutzt deshalb `Object.entries(inverter.DC || {})`.
+
+## Aktuelle UI-Funktionen
+
+- Normalmodus: Module anzeigen.
+- Editiermodus: Module per Pointer-Events frei verschieben.
+- Module rasten beim Verschieben auf ein 16px-Platzierungsraster ein.
+- Automatische Anordnung nutzt ebenfalls dieses Raster.
+- Positionen werden nur im Vue-State gehalten.
+- Keine Speicherung beim Draggen.
+- Kein expliziter Speicherbutton vorhanden.
+- Deaktivierte Module (`poll_enabled=false`) werden standardmaessig ausgeblendet.
+- Per Schalter `Deaktivierte anzeigen` koennen sie wieder eingeblendet werden.
+- Modulkarte zeigt sichtbar:
+  - Wechselrichtername
+  - Kanalnummer
+  - Leistung
+  - Spannung
+  - Strom
+  - Tagesertrag
+  - Debug-ID / Modul-Key
+- Mouseover-Tooltip zeigt Debugdetails:
+  - key
+  - serial
+  - inverter
+  - channel
+  - x/y
+  - poll_enabled
+  - reachable
+  - producing
+  - powerMaximum
+  - Power / Voltage / Current / YieldDay als Rohwerte
+- Module sind optisch hochformatig wie PV-Module dargestellt.
+- Zellraster innerhalb der Module wurde wieder entfernt.
+- Status wird als Rahmenfarbe dargestellt:
+  - disabled: secondary
+  - offline: danger
+  - idle: warning
+  - producing: success
+
+## Heatmap
+
+Die Moduluebersicht hat eine optionale Heatmap-Auswahl:
+
+- Keine Heatmap
+- Heatmap: Leistung
+- Heatmap: Leistung / Maximum
+- Heatmap: Tagesertrag
+
+Berechnung:
+
+- `Heatmap: Leistung` skaliert relativ zum staerksten aktuell sichtbaren Modul.
+- `Heatmap: Tagesertrag` skaliert relativ zum hoechsten Tagesertrag der aktuell sichtbaren Module.
+- `Heatmap: Leistung / Maximum` skaliert pro Modul:
+
+```text
+ratio = module.Power.v / module.powerMaximum
+```
+
+Finding zu Maximalwerten:
+
+- In den getesteten WebSocket-Daten war `Power.max` nicht enthalten.
+- Beispiel:
+
+```json
+{"v":59.9,"u":"W","d":1}
+```
+
+Fallback fuer `powerMaximum`:
+
+```text
+Power.max vorhanden -> Power.max
+sonst -> inverter.limit_absolute / Anzahl DC-Kanaele
+```
+
+Beispiel:
+
+```text
+HM1500 mit 4 DC-Kanaelen: 1500 W / 4 = 375 W pro Modul
+```
+
+Wenn weder `Power.max` noch ein sinnvoller Fallback vorhanden ist, wird im Modus `Leistung / Maximum` fuer dieses Modul keine Heatmap-Farbe gesetzt.
+
+Die Farbe wird in `heatmapStyle(module)` per HSL berechnet:
+
+```text
+ratio = value / maximum
+hue = 210 - ratio * 150
+backgroundLightness = 96 - ratio * 24
+borderLightness = 58 - ratio * 18
+```
+
+Niedrige Werte sind blaeulich/hell, hohe Werte gelblich/satter.
+
+## Bekannte UI-/Daten-Themen
+
+- Anfangs wurden keine Module angezeigt, weil `GET /api/livedata/status` keine `DC`-Daten enthielt. Nach WebSocket-Daten erscheinen sie.
+- Beim Verschieben wirkten Module teilweise doppelt. Ursache war wahrscheinlich Ueberlappung durch stueckweise eintreffende WebSocket-Daten und gleiche automatische Startpositionen. Die Positionsvergabe wurde kollisionsresistenter gemacht.
+- Falls nochmal scheinbare Duplikate sichtbar werden, zuerst die eingeblendeten Modul-Keys vergleichen:
+  - Gleicher Key: Rendering-/State-Bug.
+  - Unterschiedlicher Key: echte unterschiedliche Kanaele, nur optisch/positionell aehnlich.
+
+## Aktuelle technische Hinweise
+
+- `ModuleOverviewView.vue` nutzt lokales `<style scoped>`.
+- Bootstrap und globale App-Styles werden weiterhin ueber `webapp/src/scss/styles.scss` und `App.vue` genutzt.
+- Die Moduluebersicht verwendet globale Bootstrap-Klassen fuer Buttons, Badges, Form Controls usw.
+- Modul-spezifische CSS-Klassen bleiben lokal in `ModuleOverviewView.vue`.
+
+## Aktuelle Verifikation
+
+Wiederholt erfolgreich ausgefuehrt:
+
+```powershell
+cd C:\DEV\PlatformIO\OpenDTU-GitClone\OpenDTU\webapp
+corepack yarn type-check
+```
+
+`corepack yarn build` wurde einmal erfolgreich ausgefuehrt. Dabei wurden auch `webapp_dist/index.html.gz` und `webapp_dist/js/app.js.gz` geaendert. Fuer einen reinen Source-Commit diese Build-Artefakte bewusst behandeln.
+
+Der lokale Vite-Dev-Server lief zuletzt auf:
+
+```text
+http://127.0.0.1:5174/module-overview
+```
+
+Port `5173` war belegt, Vite wich auf `5174` aus.
+
 ## UI-Debugging
 
 Die Webapp kann lokal mit Vite debuggt werden.
@@ -223,11 +374,14 @@ Fuer reines UI-Layout und Dragging reicht initial der GET-Mock. WebSocket `/live
 
 ## Naechste sinnvolle Schritte
 
-1. `webapp/vite.user.ts` fuer echten ESP32 oder Mock-Server setzen.
-2. Webapp mit `corepack yarn dev` starten.
-3. Neue `ModuleOverviewView.vue` erstellen.
-4. Route und Menueeintrag ergaenzen.
-5. Initiale Live-Daten laden und Module aus `inverters[].DC[]` ableiten.
-6. Editiermodus mit Pointer-Dragging implementieren.
-7. Layout-JSON nur bei explizitem Speichern per Datei-API hochladen.
-8. `corepack yarn build` und bei Bedarf `corepack yarn type-check` ausfuehren.
+1. UI im Browser weiter gegen echten ESP32 pruefen, insbesondere:
+   - scheinbare Duplikate anhand sichtbarer Modul-Keys bewerten
+   - Heatmap-Modus `Leistung / Maximum` mit Fallbackwerten pruefen
+   - Bedienbarkeit auf kleinen Bildschirmen pruefen
+2. Entscheiden, ob der Debug-Key dauerhaft sichtbar bleiben soll oder spaeter nur im Editier-/Debugmodus.
+3. Optional temporaere Layout-Sicherung in `localStorage` implementieren, ohne ESP-Restart.
+4. Persistenz erst danach implementieren:
+   - Layout laden: `GET /api/file/get?file=module_overview.json`
+   - Layout speichern nur per explizitem Button: `POST /api/file/upload?file=module_overview.json`
+   - Restart nach Upload bewusst behandeln.
+5. Danach `corepack yarn type-check` und `corepack yarn build` ausfuehren.
