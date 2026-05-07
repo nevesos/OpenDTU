@@ -60,6 +60,9 @@
         "EditMode": "Modifier",
         "Arrange": "Disposer",
         "ShowDisabled": "Afficher les modules desactives",
+        "HeatmapNone": "Pas de heatmap",
+        "HeatmapPower": "Heatmap : puissance",
+        "HeatmapYieldDay": "Heatmap : rendement du jour",
         "NoModules": "Aucune valeur de module trouvée.",
         "Channel": "Canal {channel}"
     },

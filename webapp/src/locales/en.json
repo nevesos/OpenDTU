@@ -60,6 +60,9 @@
         "EditMode": "Edit",
         "Arrange": "Arrange",
         "ShowDisabled": "Show disabled",
+        "HeatmapNone": "No heatmap",
+        "HeatmapPower": "Heatmap: Power",
+        "HeatmapYieldDay": "Heatmap: Daily yield",
         "NoModules": "No module values found.",
         "Channel": "Channel {channel}"
     },

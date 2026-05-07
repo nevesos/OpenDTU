@@ -26,6 +26,11 @@
                         {{ $t('moduleoverview.ShowDisabled') }}
                     </label>
                 </div>
+                <select v-model="heatmapMode" class="form-select form-select-sm module-overview-select">
+                    <option value="none">{{ $t('moduleoverview.HeatmapNone') }}</option>
+                    <option value="power">{{ $t('moduleoverview.HeatmapPower') }}</option>
+                    <option value="yieldDay">{{ $t('moduleoverview.HeatmapYieldDay') }}</option>
+                </select>
                 <div class="btn-group" role="group">
                     <button type="button" class="btn btn-outline-primary" :class="{ active: editMode }" @click="toggleEditMode">
                         <BIconPencilSquare />&nbsp;{{ $t('moduleoverview.EditMode') }}
@@ -53,7 +58,7 @@
                 :key="module.key"
                 class="module-card"
                 :class="[statusClass(module), { 'module-card-edit': editMode, 'module-card-dragging': dragState?.key === module.key }]"
-                :style="moduleStyle(module.key)"
+                :style="[moduleStyle(module.key), heatmapStyle(module)]"
                 :title="moduleDebugTitle(module)"
                 @pointerdown="onPointerDown($event, module.key)"
             >
@@ -89,6 +94,11 @@ interface ModulePosition {
     y: number;
 }
 
+const MODULE_WIDTH = 150;
+const MODULE_HEIGHT = 250;
+const MODULE_GAP = 18;
+const PLACEMENT_GRID_SIZE = 16;
+
 interface ModuleItem {
     key: string;
     inverterName: string;
@@ -118,6 +128,7 @@ export default defineComponent({
             isWebsocketConnected: false,
             editMode: false,
             showDisabledModules: false,
+            heatmapMode: 'none' as 'none' | 'power' | 'yieldDay',
             positions: {} as Record<string, ModulePosition>,
             dragState: null as
                 | {
@@ -186,6 +197,13 @@ export default defineComponent({
         },
         offlineCount(): number {
             return this.visibleModules.filter((module) => module.pollEnabled && !module.reachable).length;
+        },
+        heatmapMaximum(): number {
+            if (this.heatmapMode === 'none') {
+                return 0;
+            }
+
+            return Math.max(...this.visibleModules.map((module) => this.heatmapValue(module)), 0);
         },
     },
     methods: {
@@ -274,22 +292,21 @@ export default defineComponent({
             this.positions = nextPositions;
         },
         defaultPosition(index: number, occupiedPositions: Set<string> = new Set()): ModulePosition {
-            const cardWidth = 180;
-            const cardHeight = 138;
-            const gap = 16;
-            const columns = Math.max(1, Math.floor(((this.$refs.canvas as HTMLElement | undefined)?.clientWidth || 960) / (cardWidth + gap)));
+            const stepX = this.snapToGrid(MODULE_WIDTH + MODULE_GAP);
+            const stepY = this.snapToGrid(MODULE_HEIGHT + MODULE_GAP);
+            const columns = Math.max(1, Math.floor(((this.$refs.canvas as HTMLElement | undefined)?.clientWidth || 960) / stepX));
 
             let nextIndex = index;
             let position = {
-                x: gap + (nextIndex % columns) * (cardWidth + gap),
-                y: gap + Math.floor(nextIndex / columns) * (cardHeight + gap),
+                x: PLACEMENT_GRID_SIZE + (nextIndex % columns) * stepX,
+                y: PLACEMENT_GRID_SIZE + Math.floor(nextIndex / columns) * stepY,
             };
 
             while (occupiedPositions.has(this.positionKey(position))) {
                 nextIndex += 1;
                 position = {
-                    x: gap + (nextIndex % columns) * (cardWidth + gap),
-                    y: gap + Math.floor(nextIndex / columns) * (cardHeight + gap),
+                    x: PLACEMENT_GRID_SIZE + (nextIndex % columns) * stepX,
+                    y: PLACEMENT_GRID_SIZE + Math.floor(nextIndex / columns) * stepY,
                 };
             }
 
@@ -297,6 +314,9 @@ export default defineComponent({
         },
         positionKey(position: ModulePosition): string {
             return `${Math.round(position.x)}:${Math.round(position.y)}`;
+        },
+        snapToGrid(value: number): number {
+            return Math.round(value / PLACEMENT_GRID_SIZE) * PLACEMENT_GRID_SIZE;
         },
         arrangeModules() {
             const nextPositions = {} as Record<string, ModulePosition>;
@@ -341,12 +361,14 @@ export default defineComponent({
             const rect = canvas.getBoundingClientRect();
             const x = event.clientX - rect.left - this.dragState.offsetX;
             const y = event.clientY - rect.top - this.dragState.offsetY;
+            const snappedX = this.snapToGrid(x);
+            const snappedY = this.snapToGrid(y);
 
             this.positions = {
                 ...this.positions,
                 [this.dragState.key]: {
-                    x: Math.max(0, Math.min(x, canvas.clientWidth - 180)),
-                    y: Math.max(0, Math.min(y, canvas.clientHeight - 138)),
+                    x: Math.max(0, Math.min(snappedX, canvas.clientWidth - MODULE_WIDTH)),
+                    y: Math.max(0, Math.min(snappedY, canvas.clientHeight - MODULE_HEIGHT)),
                 },
             };
         },
@@ -368,6 +390,33 @@ export default defineComponent({
             return {
                 left: `${position.x}px`,
                 top: `${position.y}px`,
+            };
+        },
+        heatmapValue(module: ModuleItem): number {
+            if (this.heatmapMode === 'power') {
+                return module.Power?.v ?? 0;
+            }
+
+            if (this.heatmapMode === 'yieldDay') {
+                return module.YieldDay?.v ?? 0;
+            }
+
+            return 0;
+        },
+        heatmapStyle(module: ModuleItem) {
+            if (this.heatmapMode === 'none' || this.heatmapMaximum <= 0 || !module.pollEnabled) {
+                return {};
+            }
+
+            const value = Math.max(0, this.heatmapValue(module));
+            const ratio = Math.min(1, value / this.heatmapMaximum);
+            const hue = 210 - ratio * 150;
+            const backgroundLightness = 96 - ratio * 24;
+            const borderLightness = 58 - ratio * 18;
+
+            return {
+                backgroundColor: `hsl(${hue}, 85%, ${backgroundLightness}%)`,
+                borderColor: `hsl(${hue}, 80%, ${borderLightness}%)`,
             };
         },
         statusClass(module: ModuleItem) {
@@ -437,6 +486,10 @@ export default defineComponent({
     cursor: crosshair;
 }
 
+.module-overview-select {
+    width: auto;
+}
+
 .module-overview-grid {
     position: absolute;
     inset: 0;
@@ -451,11 +504,10 @@ export default defineComponent({
 
 .module-card {
     position: absolute;
-    width: 180px;
-    height: 138px;
-    padding: 0.75rem;
-    border: 1px solid var(--bs-border-color);
-    border-left-width: 0.5rem;
+    width: 150px;
+    height: 250px;
+    padding: 0.65rem;
+    border: 2px solid var(--bs-border-color);
     border-radius: var(--bs-border-radius);
     background-color: var(--bs-body-bg);
     box-shadow: var(--bs-box-shadow-sm);
@@ -476,26 +528,25 @@ export default defineComponent({
 }
 
 .module-card-producing {
-    border-left-color: var(--bs-success);
+    border-color: var(--bs-success);
 }
 
 .module-card-idle {
-    border-left-color: var(--bs-warning);
+    border-color: var(--bs-warning);
 }
 
 .module-card-offline {
-    border-left-color: var(--bs-danger);
+    border-color: var(--bs-danger);
 }
 
 .module-card-disabled {
-    border-left-color: var(--bs-secondary);
+    border-color: var(--bs-secondary);
     opacity: 0.75;
 }
 
 .module-card-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
+    display: grid;
+    grid-template-columns: 1fr;
     gap: 0.5rem;
 }
 
@@ -503,23 +554,30 @@ export default defineComponent({
     min-width: 0;
     overflow: hidden;
     font-weight: 600;
+    line-height: 1.1;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
 .module-power {
-    margin-top: 0.65rem;
-    font-size: 1.65rem;
+    margin-top: 0.75rem;
+    padding: 0.2rem 0.35rem;
+    border-radius: var(--bs-border-radius-sm);
+    background-color: rgb(var(--bs-body-bg-rgb), 0.82);
+    font-size: 1.35rem;
     font-weight: 700;
     line-height: 1.1;
 }
 
 .module-values {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 0.35rem;
-    margin-top: 0.65rem;
-    color: var(--bs-secondary-color);
+    grid-template-columns: 1fr;
+    gap: 0.25rem;
+    margin-top: 0.7rem;
+    padding: 0.35rem;
+    border-radius: var(--bs-border-radius-sm);
+    background-color: rgb(var(--bs-body-bg-rgb), 0.82);
+    color: var(--bs-body-color);
     font-size: 0.78rem;
 }
 
@@ -531,7 +589,10 @@ export default defineComponent({
 }
 
 .module-key {
-    margin-top: 0.55rem;
+    position: absolute;
+    right: 0.6rem;
+    bottom: 0.55rem;
+    left: 0.6rem;
     overflow: hidden;
     color: var(--bs-secondary-color);
     font-family: var(--bs-font-monospace);
