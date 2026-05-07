@@ -59,6 +59,7 @@
         "Offline": "Hors ligne",
         "EditMode": "Modifier",
         "Arrange": "Disposer",
+        "ShowDisabled": "Afficher les modules desactives",
         "NoModules": "Aucune valeur de module trouvée.",
         "Channel": "Canal {channel}"
     },

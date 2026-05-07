@@ -59,6 +59,7 @@
         "Offline": "Offline",
         "EditMode": "Edit",
         "Arrange": "Arrange",
+        "ShowDisabled": "Show disabled",
         "NoModules": "No module values found.",
         "Channel": "Channel {channel}"
     },

@@ -10,33 +10,46 @@
     >
         <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between mb-3">
             <div>
-                <span class="badge text-bg-secondary me-2">{{ $t('moduleoverview.Modules') }}: {{ modules.length }}</span>
+                <span class="badge text-bg-secondary me-2">{{ $t('moduleoverview.Modules') }}: {{ visibleModules.length }}</span>
                 <span class="badge text-bg-success me-2">{{ $t('moduleoverview.Producing') }}: {{ producingCount }}</span>
                 <span class="badge text-bg-danger">{{ $t('moduleoverview.Offline') }}: {{ offlineCount }}</span>
             </div>
-            <div class="btn-group" role="group">
-                <button type="button" class="btn btn-outline-primary" :class="{ active: editMode }" @click="toggleEditMode">
-                    <BIconPencilSquare />&nbsp;{{ $t('moduleoverview.EditMode') }}
-                </button>
-                <button type="button" class="btn btn-outline-secondary" :disabled="!editMode" @click="arrangeModules">
-                    <BIconGrid3x3Gap />&nbsp;{{ $t('moduleoverview.Arrange') }}
-                </button>
+            <div class="d-flex flex-wrap gap-2 align-items-center">
+                <div class="form-check form-switch mb-0">
+                    <input
+                        id="showDisabledModules"
+                        v-model="showDisabledModules"
+                        class="form-check-input"
+                        type="checkbox"
+                    />
+                    <label class="form-check-label" for="showDisabledModules">
+                        {{ $t('moduleoverview.ShowDisabled') }}
+                    </label>
+                </div>
+                <div class="btn-group" role="group">
+                    <button type="button" class="btn btn-outline-primary" :class="{ active: editMode }" @click="toggleEditMode">
+                        <BIconPencilSquare />&nbsp;{{ $t('moduleoverview.EditMode') }}
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary" :disabled="!editMode" @click="arrangeModules">
+                        <BIconGrid3x3Gap />&nbsp;{{ $t('moduleoverview.Arrange') }}
+                    </button>
+                </div>
             </div>
         </div>
 
-        <BootstrapAlert :show="modules.length === 0" variant="info">
+        <BootstrapAlert :show="visibleModules.length === 0" variant="info">
             {{ $t('moduleoverview.NoModules') }}
         </BootstrapAlert>
 
         <div
-            v-if="modules.length > 0"
+            v-if="visibleModules.length > 0"
             ref="canvas"
             class="module-overview-canvas"
             :class="{ 'module-overview-canvas-edit': editMode }"
         >
             <div class="module-overview-grid"></div>
             <div
-                v-for="module in modules"
+                v-for="module in visibleModules"
                 :key="module.key"
                 class="module-card"
                 :class="[statusClass(module), { 'module-card-edit': editMode, 'module-card-dragging': dragState?.key === module.key }]"
@@ -104,6 +117,7 @@ export default defineComponent({
             liveData: { inverters: [] } as unknown as LiveData,
             isWebsocketConnected: false,
             editMode: false,
+            showDisabledModules: false,
             positions: {} as Record<string, ModulePosition>,
             dragState: null as
                 | {
@@ -160,11 +174,18 @@ export default defineComponent({
 
             return Array.from(modulesByKey.values());
         },
+        visibleModules(): ModuleItem[] {
+            if (this.showDisabledModules) {
+                return this.modules;
+            }
+
+            return this.modules.filter((module) => module.pollEnabled);
+        },
         producingCount(): number {
-            return this.modules.filter((module) => module.pollEnabled && module.reachable && module.producing).length;
+            return this.visibleModules.filter((module) => module.pollEnabled && module.reachable && module.producing).length;
         },
         offlineCount(): number {
-            return this.modules.filter((module) => module.pollEnabled && !module.reachable).length;
+            return this.visibleModules.filter((module) => module.pollEnabled && !module.reachable).length;
         },
     },
     methods: {
@@ -236,7 +257,7 @@ export default defineComponent({
             const nextPositions = {} as Record<string, ModulePosition>;
             const occupiedPositions = new Set<string>();
 
-            this.modules.forEach((module, index) => {
+            this.visibleModules.forEach((module, index) => {
                 const existingPosition = this.positions[module.key];
                 const existingPositionKey = existingPosition !== undefined ? this.positionKey(existingPosition) : '';
 
@@ -279,7 +300,7 @@ export default defineComponent({
         },
         arrangeModules() {
             const nextPositions = {} as Record<string, ModulePosition>;
-            this.modules.forEach((module, index) => {
+            this.visibleModules.forEach((module, index) => {
                 nextPositions[module.key] = this.defaultPosition(index);
             });
             this.positions = nextPositions;
