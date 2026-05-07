@@ -69,23 +69,25 @@ void WebApiFileClass::onFileListGet(AsyncWebServerRequest* request)
 void WebApiFileClass::onFileGet(AsyncWebServerRequest* request)
 {
     String requestFile = CONFIG_FILENAME;
-    bool allowReadonlyAccess = false;
 
     if (request->hasParam("file")) {
         String name = "/" + request->getParam("file")->value();
-        if (LittleFS.exists(name)) {
-            requestFile = name;
-            allowReadonlyAccess = isReadonlyAllowedFile(name);
-        } else {
+        const bool allowReadonlyAccess = isReadonlyAllowedFile(name);
+
+        if (allowReadonlyAccess) {
+            if (!WebApi.checkCredentialsReadonly(request)) {
+                return;
+            }
+        } else if (!WebApi.checkCredentials(request)) {
+            return;
+        }
+
+        if (!LittleFS.exists(name)) {
             request->send(404);
             return;
         }
-    }
 
-    if (allowReadonlyAccess) {
-        if (!WebApi.checkCredentialsReadonly(request)) {
-            return;
-        }
+        requestFile = name;
     } else if (!WebApi.checkCredentials(request)) {
         return;
     }

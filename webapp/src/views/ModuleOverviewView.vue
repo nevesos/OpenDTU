@@ -307,9 +307,7 @@ export default defineComponent({
             this.updateCanvasAvailableHeightAfterRender();
         },
         visibleModules() {
-            this.updateCanvasAvailableHeightAfterRender();
-        },
-        showDisabledModules() {
+            this.ensureModulePositions();
             this.updateCanvasAvailableHeightAfterRender();
         },
     },
