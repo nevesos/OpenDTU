@@ -199,6 +199,151 @@ Die Module werden aus `inverters[].DC` erzeugt. Wichtiges Datenformat-Finding:
   - idle: warning
   - producing: success
 
+## SVG-Hintergrund / Zeichenflaeche
+
+Stand: 2026-05-07 nach mehreren UI-Iterationen.
+
+Die Moduluebersicht hat jetzt im Editiermodus eine SVG-Hintergrundebene unter den Modulkarten.
+
+Aktueller Funktionsumfang:
+
+- Button `Zeichnen` aktiviert/deaktiviert den Zeichenmodus.
+- Zeichenmodus funktioniert punktbasiert, nicht freihand:
+  - Klick auf freie Flaeche setzt einen Punkt.
+  - Punkte werden per gerader Linie verbunden.
+  - Beim Bewegen der Maus wird eine Vorschau-Linie vom letzten Punkt zur Mausposition angezeigt.
+- Solange Zeichnen aktiv ist, werden gesetzte Punkte als kleine Griffpunkte angezeigt.
+- Punkte koennen per Drag verschoben werden.
+- Klick auf eine bestehende Verbindungslinie fuegt dort einen neuen Punkt in diese Form ein.
+- Klick auf einen vorhandenen Punkt der aktiven offenen Form schliesst die Form.
+- Wird der letzte Punkt per Drag auf einen vorhandenen Punkt gelegt, wird die Form ebenfalls geschlossen.
+- Nach dem Schliessen ist keine aktive Form mehr gesetzt; der naechste Klick auf die Flaeche beginnt eine neue Form.
+- `Escape` bricht die aktuelle aktive Zeichnung ab:
+  - gesetzte Punkte/Formen bleiben erhalten,
+  - aktive Form wird verlassen,
+  - Vorschau-Linie verschwindet.
+- Rechtsklick auf eine Form oder auf einen ihrer Punkte loescht die ganze Form erst nach `window.confirm(...)`.
+- `Undo` entfernt beim aktiven offenen Pfad den letzten Punkt bzw. entfernt den Pfad bei nur einem Punkt.
+- `Hintergrund loeschen` entfernt alle SVG-Formen.
+
+Technisches Modell:
+
+- Typen in `ModuleOverviewView.vue`:
+  - `DrawingPoint`
+  - `BackgroundPath`
+  - `BackgroundControlPoint`
+  - `BackgroundPreviewLine`
+- `BackgroundPath` enthaelt:
+
+```ts
+{
+  id: number;
+  color: string;
+  width: number;
+  points: DrawingPoint[];
+  closed: boolean;
+}
+```
+
+- Die SVG-Pfade werden im Vue-State als strukturierte Punktlisten gehalten.
+- `pathData(path)` baut daraus den SVG-`d`-String.
+- `backgroundSvgMarkup()` erzeugt bereits ein persistierbares SVG-Markup.
+- Vorschau-Linie und Griffpunkte werden nur in der UI gerendert und nicht in `backgroundSvgMarkup()` exportiert.
+- Noch keine Persistenz implementiert:
+  - kein Laden von `module_overview.svg`,
+  - kein Speichern nach LittleFS,
+  - kein Import/Export im UI.
+
+Hinweis zur Architektur:
+
+- Die SVG-Zeichenlogik liegt aktuell noch komplett in `ModuleOverviewView.vue`.
+- Kurzfristig ist das akzeptiert, weil die Funktion nur von dieser View genutzt wird.
+- Vor Persistenz oder weiteren Werkzeugen sollte die Logik extrahiert werden, zum Beispiel nach:
+
+```text
+webapp/src/components/ModuleOverview/SvgBackgroundEditor.vue
+webapp/src/types/ModuleOverview.ts
+```
+
+Dann sollte `ModuleOverviewView.vue` nur noch Toolbar, Live-Daten, Layout und Speichern/Laden koordinieren.
+
+## Zoom und Zeichenbereich-Groesse
+
+Die Ansicht hat einen Zoom-Select:
+
+- 50 %
+- 75 %
+- 100 %
+- 125 %
+- 150 %
+
+Wichtig:
+
+- Gespeicherte Koordinaten bleiben logische Pixel.
+- Nur die Darstellung wird skaliert.
+- Die Arbeitsflaeche wird ueber `.module-overview-workspace` mit `transform: scale(zoomFactor)` skaliert.
+- Ein aeusserer `.module-overview-zoom-spacer` stellt die Scrollgroesse bereit.
+- Pointer-Koordinaten werden in `canvasPointerPosition(event)` durch `zoomFactor` zurueckgerechnet.
+
+Aktuelle Konstanten:
+
+```ts
+const MODULE_WIDTH = 150;
+const MODULE_HEIGHT = 250;
+const MODULE_GAP = 18;
+const PLACEMENT_GRID_SIZE = 16;
+const CANVAS_MIN_WIDTH = 960;
+const CANVAS_MIN_HEIGHT = 320;
+const CANVAS_MIN_VIEWPORT_HEIGHT = 320;
+const CANVAS_BOTTOM_GAP = 16;
+const CANVAS_VERTICAL_OVERFLOW_TOLERANCE = 24;
+```
+
+Aktuelle Hoehenlogik:
+
+- `canvasAvailableHeight` wird per `updateCanvasAvailableHeight()` aus der echten Position im Viewport berechnet:
+
+```text
+window.innerHeight - canvas.getBoundingClientRect().top - CANVAS_BOTTOM_GAP
+```
+
+- Die Canvas bekommt diese Hoehe per Inline-Style aus `canvasStyle`.
+- `canvasStyle` schaltet `overflowY` aktuell mit Toleranz:
+
+```text
+scaledCanvasHeight > canvasAvailableHeight + CANVAS_VERTICAL_OVERFLOW_TOLERANCE
+  -> overflow-y: auto
+  sonst overflow-y: hidden
+```
+
+Wichtige Historie zur Scrollbar-Suche:
+
+- Eine reine CSS-Schaetzung wie `height: clamp(..., calc(100vh - 15rem), ...)` wurde verworfen, weil Toolbar, Navbar, Header und Zeilenumbrueche dynamisch sind.
+- Ein ResizeObserver-/Viewport-Ansatz wurde kurz getestet, dann wieder entfernt, weil er die Groessenlogik zu komplex machte.
+- `scrollbar-gutter: stable` wurde entfernt, weil es eine dauerhafte Scrollbar-Spur erzeugen kann.
+- `box-sizing: border-box` wurde fuer `.module-card` gesetzt, damit CSS-Hoehe und `MODULE_HEIGHT` zusammenpassen.
+- Die vertikale Scrollbar im Zeichenbereich war zuletzt noch Thema. Verdacht:
+  - tatsaechlicher DOM-Overflow durch Modulkarte, Shadow, horizontale Scrollbar oder Rundung,
+  - die aktuelle Toleranz blendet kleine vertikale Restueberlaeufe aus.
+- Falls die Scrollbar weiter sichtbar bleibt, sollte im Browser direkt gemessen werden:
+
+```js
+const c = document.querySelector('.module-overview-canvas');
+const s = document.querySelector('.module-overview-zoom-spacer');
+const w = document.querySelector('.module-overview-workspace');
+({
+  canvasClientHeight: c.clientHeight,
+  canvasScrollHeight: c.scrollHeight,
+  canvasOffsetHeight: c.offsetHeight,
+  spacerClientHeight: s.clientHeight,
+  spacerOffsetHeight: s.offsetHeight,
+  workspaceRect: w.getBoundingClientRect(),
+  canvasRect: c.getBoundingClientRect(),
+});
+```
+
+Danach zuerst pruefen, ob `scrollHeight - clientHeight` nur wenige Pixel oder echter Inhalt ist.
+
 ## Heatmap
 
 Die Moduluebersicht hat eine optionale Heatmap-Auswahl:
@@ -267,6 +412,16 @@ Niedrige Werte sind blaeulich/hell, hohe Werte gelblich/satter.
 - Bootstrap und globale App-Styles werden weiterhin ueber `webapp/src/scss/styles.scss` und `App.vue` genutzt.
 - Die Moduluebersicht verwendet globale Bootstrap-Klassen fuer Buttons, Badges, Form Controls usw.
 - Modul-spezifische CSS-Klassen bleiben lokal in `ModuleOverviewView.vue`.
+- `ModuleOverviewView.vue` ist inzwischen gross und enthaelt Live-Daten, Modul-Dragging, SVG-Editor, Zoom und Hoehenlogik.
+- Naechste groessere Aenderung sollte eher extrahieren als weiter in dieser View wachsen.
+- Relevante Locale-Keys fuer die neuen UI-Elemente:
+  - `moduleoverview.DrawBackground`
+  - `moduleoverview.Undo`
+  - `moduleoverview.ClearBackground`
+  - `moduleoverview.ConfirmDeleteShape`
+  - `moduleoverview.DrawColor`
+  - `moduleoverview.DrawWidth`
+  - `moduleoverview.Zoom`
 
 ## Aktuelle Verifikation
 
@@ -277,7 +432,12 @@ cd C:\DEV\PlatformIO\OpenDTU-GitClone\OpenDTU\webapp
 corepack yarn type-check
 ```
 
-`corepack yarn build` wurde einmal erfolgreich ausgefuehrt. Dabei wurden auch `webapp_dist/index.html.gz` und `webapp_dist/js/app.js.gz` geaendert. Fuer einen reinen Source-Commit diese Build-Artefakte bewusst behandeln.
+`corepack yarn build-only` wurde nach den UI-Aenderungen erfolgreich ausgefuehrt, musste aber wegen `spawn EPERM` ausserhalb der Sandbox laufen. Dabei wurde `webapp_dist/js/app.js.gz` geaendert. Fuer einen reinen Source-Commit diese Build-Artefakte bewusst behandeln.
+
+Bekannter Build-Hinweis:
+
+- `corepack yarn build-only` kann in der Sandbox mit `spawn EPERM` beim Laden von `vite.config.ts` scheitern.
+- Bei Bedarf mit Escalation ausfuehren.
 
 Der lokale Vite-Dev-Server lief zuletzt auf:
 
@@ -374,14 +534,26 @@ Fuer reines UI-Layout und Dragging reicht initial der GET-Mock. WebSocket `/live
 
 ## Naechste sinnvolle Schritte
 
-1. UI im Browser weiter gegen echten ESP32 pruefen, insbesondere:
+1. Aktuelle Zeichenbereich-Groesse im Browser messen:
+   - `clientHeight`, `scrollHeight`, `offsetHeight` von `.module-overview-canvas`
+   - Hoehe von `.module-overview-zoom-spacer`
+   - `getBoundingClientRect()` von Canvas, Spacer, Workspace und Modulkarten
+   - erst danach weitere Scrollbar-Fixes machen.
+2. UI im Browser gegen echten ESP32 pruefen:
+   - Zeichnen, Punkt verschieben, Form schliessen, Form loeschen mit Confirm
+   - Zoom 50/75/100/125/150 %
+   - Modul-Dragging bei Zoom != 100 %
    - scheinbare Duplikate anhand sichtbarer Modul-Keys bewerten
    - Heatmap-Modus `Leistung / Maximum` mit Fallbackwerten pruefen
    - Bedienbarkeit auf kleinen Bildschirmen pruefen
-2. Entscheiden, ob der Debug-Key dauerhaft sichtbar bleiben soll oder spaeter nur im Editier-/Debugmodus.
-3. Optional temporaere Layout-Sicherung in `localStorage` implementieren, ohne ESP-Restart.
-4. Persistenz erst danach implementieren:
+3. Vor weiterer Erweiterung SVG-Editor extrahieren:
+   - `SvgBackgroundEditor.vue`
+   - gemeinsame Typen in `webapp/src/types/ModuleOverview.ts`
+4. Entscheiden, ob der Debug-Key dauerhaft sichtbar bleiben soll oder spaeter nur im Editier-/Debugmodus.
+5. Optional temporaere Layout-Sicherung in `localStorage` implementieren, ohne ESP-Restart.
+6. Persistenz erst danach implementieren:
    - Layout laden: `GET /api/file/get?file=module_overview.json`
    - Layout speichern nur per explizitem Button: `POST /api/file/upload?file=module_overview.json`
+   - SVG-Hintergrund laden/speichern: `module_overview.svg`
    - Restart nach Upload bewusst behandeln.
-5. Danach `corepack yarn type-check` und `corepack yarn build` ausfuehren.
+7. Danach `corepack yarn type-check` und `corepack yarn build-only` ausfuehren.

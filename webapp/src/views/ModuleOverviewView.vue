@@ -30,7 +30,9 @@
                     <option value="none">{{ $t('moduleoverview.HeatmapNone') }}</option>
                     <option value="power">{{ $t('moduleoverview.HeatmapPower') }}</option>
                     <option value="powerMax">{{ $t('moduleoverview.HeatmapPowerMax') }}</option>
+                    <option value="powerDiff">{{ $t('moduleoverview.HeatmapPowerDiff') }}</option>
                     <option value="yieldDay">{{ $t('moduleoverview.HeatmapYieldDay') }}</option>
+                    <option value="yieldDayDiff">{{ $t('moduleoverview.HeatmapYieldDayDiff') }}</option>
                 </select>
                 <select v-model.number="zoomFactor" class="form-select form-select-sm module-overview-select" :title="$t('moduleoverview.Zoom')">
                     <option :value="0.5">50%</option>
@@ -237,6 +239,8 @@ interface ModuleItem {
     YieldDay?: ValueObject;
 }
 
+type HeatmapMode = 'none' | 'power' | 'powerMax' | 'powerDiff' | 'yieldDay' | 'yieldDayDiff';
+
 export default defineComponent({
     components: {
         BasePage,
@@ -255,7 +259,7 @@ export default defineComponent({
             isWebsocketConnected: false,
             editMode: false,
             showDisabledModules: false,
-            heatmapMode: 'none' as 'none' | 'power' | 'powerMax' | 'yieldDay',
+            heatmapMode: 'none' as HeatmapMode,
             zoomFactor: 1,
             canvasAvailableHeight: CANVAS_MIN_VIEWPORT_HEIGHT,
             positions: {} as Record<string, ModulePosition>,
@@ -366,11 +370,29 @@ export default defineComponent({
             return this.visibleModules.filter((module) => module.pollEnabled && !module.reachable).length;
         },
         heatmapMaximum(): number {
-            if (this.heatmapMode === 'none' || this.heatmapMode === 'powerMax') {
+            if (this.heatmapMode === 'none' || this.heatmapMode === 'powerMax' || this.isHeatmapDifferenceMode()) {
                 return 0;
             }
 
-            return Math.max(...this.visibleModules.map((module) => this.heatmapValue(module)), 0);
+            return Math.max(...this.heatmapModules.map((module) => this.heatmapValue(module)), 0);
+        },
+        heatmapDifferenceRange(): { minimum: number; maximum: number } | null {
+            if (!this.isHeatmapDifferenceMode()) {
+                return null;
+            }
+
+            const values = this.heatmapModules.map((module) => this.heatmapValue(module));
+            if (values.length === 0) {
+                return null;
+            }
+
+            return {
+                minimum: Math.min(...values),
+                maximum: Math.max(...values),
+            };
+        },
+        heatmapModules(): ModuleItem[] {
+            return this.visibleModules.filter((module) => module.pollEnabled);
         },
         backgroundControlPoints(): BackgroundControlPoint[] {
             return this.backgroundPaths.flatMap((path) =>
@@ -1030,15 +1052,18 @@ export default defineComponent({
             };
         },
         heatmapValue(module: ModuleItem): number {
-            if (this.heatmapMode === 'power' || this.heatmapMode === 'powerMax') {
+            if (this.heatmapMode === 'power' || this.heatmapMode === 'powerMax' || this.heatmapMode === 'powerDiff') {
                 return module.Power?.v ?? 0;
             }
 
-            if (this.heatmapMode === 'yieldDay') {
+            if (this.heatmapMode === 'yieldDay' || this.heatmapMode === 'yieldDayDiff') {
                 return module.YieldDay?.v ?? 0;
             }
 
             return 0;
+        },
+        isHeatmapDifferenceMode(): boolean {
+            return this.heatmapMode === 'powerDiff' || this.heatmapMode === 'yieldDayDiff';
         },
         heatmapStyle(module: ModuleItem) {
             if (this.heatmapMode === 'none' || !module.pollEnabled) {
@@ -1046,15 +1071,27 @@ export default defineComponent({
             }
 
             const value = Math.max(0, this.heatmapValue(module));
+            if (this.isHeatmapDifferenceMode()) {
+                const range = this.heatmapDifferenceRange;
+                if (range === null || range.maximum <= range.minimum) {
+                    return {};
+                }
+
+                return this.heatmapColorStyle((value - range.minimum) / (range.maximum - range.minimum));
+            }
+
             const maximum = this.heatmapMode === 'powerMax' ? module.powerMaximum : this.heatmapMaximum;
             if (maximum <= 0) {
                 return {};
             }
 
-            const ratio = Math.min(1, value / maximum);
-            const hue = 210 - ratio * 150;
-            const backgroundLightness = 96 - ratio * 24;
-            const borderLightness = 58 - ratio * 18;
+            return this.heatmapColorStyle(value / maximum);
+        },
+        heatmapColorStyle(ratio: number) {
+            const normalizedRatio = Math.min(1, Math.max(0, ratio));
+            const hue = 210 - normalizedRatio * 150;
+            const backgroundLightness = 96 - normalizedRatio * 24;
+            const borderLightness = 58 - normalizedRatio * 18;
 
             return {
                 backgroundColor: `hsl(${hue}, 85%, ${backgroundLightness}%)`,

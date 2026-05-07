@@ -69,7 +69,9 @@
         "HeatmapNone": "Pas de heatmap",
         "HeatmapPower": "Heatmap : puissance",
         "HeatmapPowerMax": "Heatmap : puissance / maximum",
+        "HeatmapPowerDiff": "Heatmap : difference de puissance",
         "HeatmapYieldDay": "Heatmap : rendement du jour",
+        "HeatmapYieldDayDiff": "Heatmap : difference de rendement du jour",
         "Zoom": "Zoom",
         "NoModules": "Aucune valeur de module trouvée.",
         "Channel": "Canal {channel}"
