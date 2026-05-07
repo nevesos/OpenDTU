@@ -324,9 +324,7 @@ export default defineComponent({
     mounted() {
         window.addEventListener('keydown', this.onBackgroundKeyDown);
         window.addEventListener('resize', this.updateCanvasAvailableHeight);
-        this.$nextTick(() => {
-            this.updateCanvasAvailableHeight();
-        });
+        this.updateCanvasAvailableHeightAfterRender();
     },
     unmounted() {
         this.clearDragListeners();
@@ -337,6 +335,9 @@ export default defineComponent({
     },
     watch: {
         editMode() {
+            this.updateCanvasAvailableHeightAfterRender();
+        },
+        visibleModules() {
             this.updateCanvasAvailableHeightAfterRender();
         },
         showDisabledModules() {
@@ -459,8 +460,9 @@ export default defineComponent({
         canvasHeight(): number {
             const maxModuleY = Math.max(...Object.values(this.positions).map((position) => position.y + MODULE_HEIGHT + MODULE_GAP), 0);
             const maxPathY = Math.max(...this.backgroundPaths.flatMap((path) => path.points.map((point) => point.y + path.width + MODULE_GAP)), 0);
+            const visibleCanvasHeight = Math.ceil(this.canvasAvailableHeight / this.zoomFactor);
 
-            return Math.max(CANVAS_MIN_HEIGHT, Math.ceil(maxModuleY), Math.ceil(maxPathY));
+            return Math.max(CANVAS_MIN_HEIGHT, visibleCanvasHeight, Math.ceil(maxModuleY), Math.ceil(maxPathY));
         },
         scaledCanvasWidth(): number {
             return Math.ceil(this.canvasWidth * this.zoomFactor);
@@ -486,7 +488,9 @@ export default defineComponent({
     methods: {
         updateCanvasAvailableHeightAfterRender() {
             this.$nextTick(() => {
-                this.updateCanvasAvailableHeight();
+                window.setTimeout(() => {
+                    this.updateCanvasAvailableHeight();
+                }, 0);
             });
         },
         updateCanvasAvailableHeight() {
@@ -497,7 +501,10 @@ export default defineComponent({
 
             const rect = canvas.getBoundingClientRect();
             const availableHeight = window.innerHeight - rect.top - CANVAS_BOTTOM_GAP;
-            this.canvasAvailableHeight = Math.max(CANVAS_MIN_VIEWPORT_HEIGHT, Math.floor(availableHeight));
+            const nextCanvasAvailableHeight = Math.max(CANVAS_MIN_VIEWPORT_HEIGHT, Math.floor(availableHeight));
+            if (this.canvasAvailableHeight !== nextCanvasAvailableHeight) {
+                this.canvasAvailableHeight = nextCanvasAvailableHeight;
+            }
         },
         getInitialData(triggerLoading: boolean = true) {
             if (triggerLoading) {
@@ -510,6 +517,7 @@ export default defineComponent({
                     this.ensureModulePositions();
                     if (triggerLoading) {
                         this.dataLoading = false;
+                        this.updateCanvasAvailableHeightAfterRender();
                     }
                 });
         },
@@ -573,6 +581,7 @@ export default defineComponent({
             if (this.modules.length > 0) {
                 this.ensureModulePositions();
             }
+            this.updateCanvasAvailableHeightAfterRender();
         },
         normalizeBackgroundPaths(paths: BackgroundPath[]): BackgroundPath[] {
             return paths
@@ -704,6 +713,7 @@ export default defineComponent({
             }
 
             this.ensureModulePositions();
+            this.updateCanvasAvailableHeightAfterRender();
         },
         ensureModulePositions() {
             const nextPositions = { ...this.positions } as Record<string, ModulePosition>;
