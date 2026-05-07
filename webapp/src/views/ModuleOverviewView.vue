@@ -208,57 +208,23 @@ import BootstrapAlert from '@/components/BootstrapAlert.vue';
 import InverterTotalInfo from '@/components/InverterTotalInfo.vue';
 import type { AlertResponse } from '@/types/AlertResponse';
 import type { Inverter, InverterStatistics, LiveData, ValueObject } from '@/types/LiveDataStatus';
+import type {
+    BackgroundControlPoint,
+    BackgroundPath,
+    BackgroundPreviewLine,
+    DrawingPoint,
+    HeatmapMode,
+    ModuleItem,
+    ModuleOverviewLayout,
+    ModulePosition,
+} from '@/types/ModuleOverview';
 import { authHeader, authUrl, handleResponse, isLoggedIn } from '@/utils/authentication';
+import { isValidHeatmapMode, isValidZoomFactor, MODULE_OVERVIEW_LAYOUT_FILE, normalizeBackgroundPaths } from '@/utils/moduleOverview';
 import { waitRestart } from '@/utils/waitRestart';
 import WebSocketService from '@/utils/websocketService';
 import { BIconArrowCounterclockwise, BIconBrush, BIconGrid3x3Gap, BIconPencilSquare, BIconSave, BIconTrash } from 'bootstrap-icons-vue';
 import type { CSSProperties } from 'vue';
 import { defineComponent } from 'vue';
-
-interface ModulePosition {
-    x: number;
-    y: number;
-}
-
-interface DrawingPoint {
-    x: number;
-    y: number;
-}
-
-interface BackgroundPath {
-    id: number;
-    color: string;
-    width: number;
-    points: DrawingPoint[];
-    closed: boolean;
-}
-
-interface BackgroundControlPoint extends DrawingPoint {
-    pathId: number;
-    pointIndex: number;
-}
-
-interface BackgroundPreviewLine {
-    x1: number;
-    y1: number;
-    x2: number;
-    y2: number;
-    color: string;
-    width: number;
-}
-
-interface ModuleOverviewLayout {
-    version: number;
-    zoomFactor?: number;
-    heatmapMode?: HeatmapMode;
-    showDisabledModules?: boolean;
-    modules?: Array<{
-        key: string;
-        x: number;
-        y: number;
-    }>;
-    backgroundPaths?: BackgroundPath[];
-}
 
 const MODULE_WIDTH = 150;
 const MODULE_HEIGHT = 250;
@@ -269,24 +235,6 @@ const CANVAS_MIN_HEIGHT = 320;
 const CANVAS_MIN_VIEWPORT_HEIGHT = 320;
 const CANVAS_BOTTOM_GAP = 16;
 const CANVAS_VERTICAL_OVERFLOW_TOLERANCE = 24;
-const MODULE_OVERVIEW_LAYOUT_FILE = 'module_overview.json';
-
-interface ModuleItem {
-    key: string;
-    inverterName: string;
-    serial: string;
-    channel: number;
-    pollEnabled: boolean;
-    reachable: boolean;
-    producing: boolean;
-    powerMaximum: number;
-    Power?: ValueObject;
-    Voltage?: ValueObject;
-    Current?: ValueObject;
-    YieldDay?: ValueObject;
-}
-
-type HeatmapMode = 'none' | 'power' | 'powerMax' | 'powerDiff' | 'yieldDay' | 'yieldDayDiff';
 
 export default defineComponent({
     components: {
@@ -597,16 +545,16 @@ export default defineComponent({
                 ...this.positions,
                 ...positions,
             };
-            if (this.isValidZoomFactor(layout.zoomFactor)) {
+            if (isValidZoomFactor(layout.zoomFactor)) {
                 this.zoomFactor = layout.zoomFactor;
             }
-            if (this.isValidHeatmapMode(layout.heatmapMode)) {
+            if (isValidHeatmapMode(layout.heatmapMode)) {
                 this.heatmapMode = layout.heatmapMode;
             }
             if (typeof layout.showDisabledModules === 'boolean') {
                 this.showDisabledModules = layout.showDisabledModules;
             }
-            this.backgroundPaths = this.normalizeBackgroundPaths(layout.backgroundPaths || []);
+            this.backgroundPaths = normalizeBackgroundPaths(layout.backgroundPaths || []);
             this.backgroundPathSequence = Math.max(...this.backgroundPaths.map((path) => path.id), 0);
             this.activeBackgroundPathId = null;
             this.backgroundHoverPoint = null;
@@ -614,36 +562,6 @@ export default defineComponent({
                 this.ensureModulePositions();
             }
             this.updateCanvasAvailableHeightAfterRender();
-        },
-        normalizeBackgroundPaths(paths: BackgroundPath[]): BackgroundPath[] {
-            return paths
-                .filter((path) => Number.isFinite(path.id) && Array.isArray(path.points) && path.points.length > 0)
-                .map((path) => ({
-                    id: Math.trunc(path.id),
-                    color: typeof path.color === 'string' ? path.color : '#5b8def',
-                    width: Number.isFinite(path.width) ? Math.max(1, Math.trunc(path.width)) : 4,
-                    closed: path.closed === true,
-                    points: path.points
-                        .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
-                        .map((point) => ({
-                            x: Math.max(0, Math.round(point.x)),
-                            y: Math.max(0, Math.round(point.y)),
-                        })),
-                }))
-                .filter((path) => path.points.length > 0);
-        },
-        isValidZoomFactor(zoomFactor?: number): zoomFactor is number {
-            return zoomFactor === 0.5 || zoomFactor === 0.75 || zoomFactor === 1 || zoomFactor === 1.25 || zoomFactor === 1.5;
-        },
-        isValidHeatmapMode(heatmapMode?: HeatmapMode): heatmapMode is HeatmapMode {
-            return (
-                heatmapMode === 'none' ||
-                heatmapMode === 'power' ||
-                heatmapMode === 'powerMax' ||
-                heatmapMode === 'powerDiff' ||
-                heatmapMode === 'yieldDay' ||
-                heatmapMode === 'yieldDayDiff'
-            );
         },
         saveLayout() {
             this.layoutSaving = true;
