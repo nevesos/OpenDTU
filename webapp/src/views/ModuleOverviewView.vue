@@ -173,29 +173,16 @@
                             />
                         </template>
                     </svg>
-                    <div
+                    <ModuleCard
                         v-for="module in visibleModules"
                         :key="module.key"
-                        class="module-card"
-                        :class="[statusClass(module), { 'module-card-edit': editMode, 'module-card-dragging': dragState?.key === module.key }]"
-                        :style="[moduleStyle(module.key), heatmapStyle(module)]"
-                        :title="moduleDebugTitle(module)"
+                        :module="module"
+                        :position="positions[module.key]"
+                        :editMode="editMode"
+                        :isDragging="dragState?.key === module.key"
+                        :heatmapStyle="heatmapStyle(module)"
                         @pointerdown="onPointerDown($event, module.key)"
-                    >
-                        <div class="module-card-header">
-                            <span class="module-title">{{ module.inverterName }}</span>
-                            <span class="badge rounded-pill" :class="statusBadgeClass(module)">
-                                {{ $t('moduleoverview.Channel', { channel: module.channel + 1 }) }}
-                            </span>
-                        </div>
-                        <div class="module-power">{{ formatValue(module.Power) }}</div>
-                        <div class="module-values">
-                            <span>{{ formatValue(module.Voltage) }}</span>
-                            <span>{{ formatValue(module.Current) }}</span>
-                            <span>{{ formatValue(module.YieldDay) }}</span>
-                        </div>
-                        <div class="module-key">{{ module.key }}</div>
-                    </div>
+                    />
                 </div>
             </div>
         </div>
@@ -206,8 +193,9 @@
 import BasePage from '@/components/BasePage.vue';
 import BootstrapAlert from '@/components/BootstrapAlert.vue';
 import InverterTotalInfo from '@/components/InverterTotalInfo.vue';
+import ModuleCard from '@/components/ModuleCard.vue';
 import type { AlertResponse } from '@/types/AlertResponse';
-import type { Inverter, InverterStatistics, LiveData, ValueObject } from '@/types/LiveDataStatus';
+import type { Inverter, InverterStatistics, LiveData } from '@/types/LiveDataStatus';
 import type {
     BackgroundControlPoint,
     BackgroundPath,
@@ -244,6 +232,7 @@ export default defineComponent({
         BootstrapAlert,
         BIconGrid3x3Gap,
         InverterTotalInfo,
+        ModuleCard,
         BIconPencilSquare,
         BIconSave,
         BIconTrash,
@@ -1163,13 +1152,6 @@ export default defineComponent({
             this.backgroundHoverPoint = null;
             this.clearBackgroundPointDragListeners();
         },
-        moduleStyle(key: string) {
-            const position = this.positions[key] || { x: 0, y: 0 };
-            return {
-                left: `${position.x}px`,
-                top: `${position.y}px`,
-            };
-        },
         heatmapValue(module: ModuleItem): number {
             if (this.heatmapMode === 'power' || this.heatmapMode === 'powerMax' || this.heatmapMode === 'powerDiff') {
                 return module.Power?.v ?? 0;
@@ -1216,56 +1198,6 @@ export default defineComponent({
                 backgroundColor: `hsl(${hue}, 85%, ${backgroundLightness}%)`,
                 borderColor: `hsl(${hue}, 80%, ${borderLightness}%)`,
             };
-        },
-        statusClass(module: ModuleItem) {
-            return {
-                'module-card-disabled': !module.pollEnabled,
-                'module-card-offline': module.pollEnabled && !module.reachable,
-                'module-card-idle': module.pollEnabled && module.reachable && !module.producing,
-                'module-card-producing': module.pollEnabled && module.reachable && module.producing,
-            };
-        },
-        statusBadgeClass(module: ModuleItem) {
-            return {
-                'text-bg-secondary': !module.pollEnabled,
-                'text-bg-danger': module.pollEnabled && !module.reachable,
-                'text-bg-warning': module.pollEnabled && module.reachable && !module.producing,
-                'text-bg-success': module.pollEnabled && module.reachable && module.producing,
-            };
-        },
-        formatValue(value?: ValueObject): string {
-            if (value === undefined) {
-                return '-';
-            }
-
-            return `${this.$n(value.v, value.d === 0 ? 'decimalNoDigits' : 'decimal')} ${value.u}`;
-        },
-        moduleDebugTitle(module: ModuleItem): string {
-            const position = this.positions[module.key] || { x: 0, y: 0 };
-
-            return [
-                `key: ${module.key}`,
-                `serial: ${module.serial}`,
-                `inverter: ${module.inverterName}`,
-                `channel: ${module.channel}`,
-                `x: ${Math.round(position.x)}`,
-                `y: ${Math.round(position.y)}`,
-                `poll_enabled: ${module.pollEnabled}`,
-                `reachable: ${module.reachable}`,
-                `producing: ${module.producing}`,
-                `powerMaximum: ${module.powerMaximum}`,
-                `Power: ${this.debugValue(module.Power)}`,
-                `Voltage: ${this.debugValue(module.Voltage)}`,
-                `Current: ${this.debugValue(module.Current)}`,
-                `YieldDay: ${this.debugValue(module.YieldDay)}`,
-            ].join('\n');
-        },
-        debugValue(value?: ValueObject): string {
-            if (value === undefined) {
-                return 'undefined';
-            }
-
-            return `${value.v} ${value.u} (d=${value.d}, max=${value.max ?? 'n/a'})`;
         },
     },
 });
@@ -1416,107 +1348,6 @@ export default defineComponent({
 .module-overview-background-point-active {
     fill: var(--bs-primary);
     stroke: var(--bs-body-bg);
-}
-
-.module-card {
-    position: absolute;
-    z-index: 1;
-    box-sizing: border-box;
-    width: 150px;
-    height: 250px;
-    padding: 0.65rem;
-    border: 2px solid var(--bs-border-color);
-    border-radius: var(--bs-border-radius);
-    background-color: var(--bs-body-bg);
-    box-shadow: var(--bs-box-shadow-sm);
-    touch-action: none;
-    user-select: none;
-}
-
-.module-card-edit {
-    cursor: grab;
-}
-
-.module-card-edit:active {
-    cursor: grabbing;
-}
-
-.module-card-dragging {
-    z-index: 2;
-}
-
-.module-card-producing {
-    border-color: var(--bs-success);
-}
-
-.module-card-idle {
-    border-color: var(--bs-warning);
-}
-
-.module-card-offline {
-    border-color: var(--bs-danger);
-}
-
-.module-card-disabled {
-    border-color: var(--bs-secondary);
-    opacity: 0.75;
-}
-
-.module-card-header {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 0.5rem;
-}
-
-.module-title {
-    min-width: 0;
-    overflow: hidden;
-    font-weight: 600;
-    line-height: 1.1;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.module-power {
-    margin-top: 0.75rem;
-    padding: 0.2rem 0.35rem;
-    border-radius: var(--bs-border-radius-sm);
-    background-color: rgb(var(--bs-body-bg-rgb), 0.82);
-    font-size: 1.35rem;
-    font-weight: 700;
-    line-height: 1.1;
-}
-
-.module-values {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 0.25rem;
-    margin-top: 0.7rem;
-    padding: 0.35rem;
-    border-radius: var(--bs-border-radius-sm);
-    background-color: rgb(var(--bs-body-bg-rgb), 0.82);
-    color: var(--bs-body-color);
-    font-size: 0.78rem;
-}
-
-.module-values span {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.module-key {
-    position: absolute;
-    right: 0.6rem;
-    bottom: 0.55rem;
-    left: 0.6rem;
-    overflow: hidden;
-    color: var(--bs-secondary-color);
-    font-family: var(--bs-font-monospace);
-    font-size: 0.68rem;
-    text-overflow: ellipsis;
-    white-space: nowrap;
 }
 
 @media (max-width: 767.98px) {
