@@ -366,6 +366,9 @@ export default defineComponent({
         offlineCount(): number {
             return this.visibleModules.filter((module) => module.pollEnabled && !module.reachable).length;
         },
+        heatmapModules(): ModuleItem[] {
+            return this.visibleModules.filter((module) => module.pollEnabled);
+        },
         heatmapMaximum(): number {
             if (this.heatmapMode === 'none' || this.heatmapMode === 'powerMax' || this.isHeatmapDifferenceMode()) {
                 return 0;
@@ -387,9 +390,6 @@ export default defineComponent({
                 minimum: Math.min(...values),
                 maximum: Math.max(...values),
             };
-        },
-        heatmapModules(): ModuleItem[] {
-            return this.visibleModules.filter((module) => module.pollEnabled);
         },
         backgroundControlPoints(): BackgroundControlPoint[] {
             return this.backgroundPaths.flatMap((path) =>
@@ -489,6 +489,57 @@ export default defineComponent({
                         this.updateCanvasAvailableHeightAfterRender();
                     }
                 });
+        },
+        reloadData() {
+            this.socket?.close();
+            this.getInitialData(false);
+            this.initSocket();
+        },
+        initSocket() {
+            const { protocol, host } = location;
+            const authString = authUrl();
+            const webSocketUrl = `${protocol === 'https:' ? 'wss' : 'ws'}://${authString}${host}/livedata`;
+
+            this.socket = new WebSocketService(webSocketUrl, {
+                onMessage: this.handleMessage,
+                onOpen: () => {
+                    this.isWebsocketConnected = true;
+                },
+                onClose: () => {
+                    this.isWebsocketConnected = false;
+                },
+            });
+
+            window.onbeforeunload = () => {
+                this.socket?.close();
+            };
+
+            this.socket?.connect();
+        },
+        handleMessage(event: MessageEvent) {
+            if (!event.data || event.data === '{}') {
+                this.socket?.close();
+                this.initSocket();
+                return;
+            }
+
+            const newData = JSON.parse(event.data);
+            if (!this.liveData.inverters) {
+                this.liveData.inverters = [];
+            }
+
+            Object.assign(this.liveData.total || {}, newData.total);
+            Object.assign(this.liveData.hints || {}, newData.hints);
+
+            const idx = this.liveData.inverters.findIndex((i) => i.serial === newData.inverters[0].serial);
+            if (idx === -1) {
+                this.liveData.inverters.push(newData.inverters[0]);
+            } else if (this.liveData.inverters[idx] !== undefined) {
+                Object.assign(this.liveData.inverters[idx], newData.inverters[0]);
+            }
+
+            this.ensureModulePositions();
+            this.updateCanvasAvailableHeightAfterRender();
         },
         loadLayout() {
             fetch(`/api/file/get?file=${MODULE_OVERVIEW_LAYOUT_FILE}`, { headers: authHeader() })
@@ -602,57 +653,6 @@ export default defineComponent({
                     })),
                 })),
             };
-        },
-        reloadData() {
-            this.socket?.close();
-            this.getInitialData(false);
-            this.initSocket();
-        },
-        initSocket() {
-            const { protocol, host } = location;
-            const authString = authUrl();
-            const webSocketUrl = `${protocol === 'https:' ? 'wss' : 'ws'}://${authString}${host}/livedata`;
-
-            this.socket = new WebSocketService(webSocketUrl, {
-                onMessage: this.handleMessage,
-                onOpen: () => {
-                    this.isWebsocketConnected = true;
-                },
-                onClose: () => {
-                    this.isWebsocketConnected = false;
-                },
-            });
-
-            window.onbeforeunload = () => {
-                this.socket?.close();
-            };
-
-            this.socket?.connect();
-        },
-        handleMessage(event: MessageEvent) {
-            if (!event.data || event.data === '{}') {
-                this.socket?.close();
-                this.initSocket();
-                return;
-            }
-
-            const newData = JSON.parse(event.data);
-            if (!this.liveData.inverters) {
-                this.liveData.inverters = [];
-            }
-
-            Object.assign(this.liveData.total || {}, newData.total);
-            Object.assign(this.liveData.hints || {}, newData.hints);
-
-            const idx = this.liveData.inverters.findIndex((i) => i.serial === newData.inverters[0].serial);
-            if (idx === -1) {
-                this.liveData.inverters.push(newData.inverters[0]);
-            } else if (this.liveData.inverters[idx] !== undefined) {
-                Object.assign(this.liveData.inverters[idx], newData.inverters[0]);
-            }
-
-            this.ensureModulePositions();
-            this.updateCanvasAvailableHeightAfterRender();
         },
         ensureModulePositions() {
             const nextPositions = { ...this.positions } as Record<string, ModulePosition>;
@@ -927,11 +927,6 @@ export default defineComponent({
             this.backgroundPointDragState = null;
             this.clearBackgroundPointDragListeners();
         },
-        clearBackgroundPointDragListeners() {
-            window.removeEventListener('pointermove', this.onBackgroundPointPointerMove);
-            window.removeEventListener('pointerup', this.onBackgroundPointPointerUp);
-            window.removeEventListener('pointercancel', this.onBackgroundPointPointerUp);
-        },
         onBackgroundKeyDown(event: KeyboardEvent) {
             if (event.key !== 'Escape' || !this.editMode || !this.backgroundDrawMode) {
                 return;
@@ -942,6 +937,11 @@ export default defineComponent({
             this.backgroundHoverPoint = null;
             this.backgroundPointDragState = null;
             this.clearBackgroundPointDragListeners();
+        },
+        clearBackgroundPointDragListeners() {
+            window.removeEventListener('pointermove', this.onBackgroundPointPointerMove);
+            window.removeEventListener('pointerup', this.onBackgroundPointPointerUp);
+            window.removeEventListener('pointercancel', this.onBackgroundPointPointerUp);
         },
         closeBackgroundPathAtPoint(pathId: number, pointIndex: number, replaceLastPoint: boolean = false) {
             const path = this.backgroundPaths.find((backgroundPath) => backgroundPath.id === pathId);
@@ -976,28 +976,6 @@ export default defineComponent({
             this.activeBackgroundPathId = null;
             this.backgroundHoverPoint = null;
         },
-        findBackgroundClosingPointIndex(pathId: number, movedPointIndex: number, point: DrawingPoint): number | null {
-            const path = this.backgroundPaths.find((backgroundPath) => backgroundPath.id === pathId);
-            if (
-                path === undefined ||
-                path.closed ||
-                path.id !== this.activeBackgroundPathId ||
-                movedPointIndex !== path.points.length - 1 ||
-                path.points.length < 3
-            ) {
-                return null;
-            }
-
-            const closingPointIndex = path.points.findIndex((existingPoint, pointIndex) => {
-                if (pointIndex === movedPointIndex) {
-                    return false;
-                }
-
-                return Math.hypot(point.x - existingPoint.x, point.y - existingPoint.y) <= 8;
-            });
-
-            return closingPointIndex === -1 ? null : closingPointIndex;
-        },
         insertBackgroundPointOnPath(pathId: number, point: DrawingPoint) {
             const path = this.backgroundPaths.find((backgroundPath) => backgroundPath.id === pathId);
             if (path === undefined || path.points.length < 2) {
@@ -1025,41 +1003,6 @@ export default defineComponent({
             });
             this.activeBackgroundPathId = path.closed ? null : path.id;
         },
-        findNearestBackgroundSegmentStartIndex(path: BackgroundPath, point: DrawingPoint): number | null {
-            let nearestSegmentStartIndex: number | null = null;
-            let nearestDistance = Number.POSITIVE_INFINITY;
-
-            for (let pointIndex = 0; pointIndex < path.points.length - 1; pointIndex += 1) {
-                const startPoint = path.points[pointIndex];
-                const endPoint = path.points[pointIndex + 1];
-                if (startPoint === undefined || endPoint === undefined) {
-                    continue;
-                }
-
-                const distance = this.distanceToSegment(point, startPoint, endPoint);
-                if (distance < nearestDistance) {
-                    nearestDistance = distance;
-                    nearestSegmentStartIndex = pointIndex;
-                }
-            }
-
-            const hitTolerance = Math.max(8, path.width + 4);
-            return nearestDistance <= hitTolerance ? nearestSegmentStartIndex : null;
-        },
-        distanceToSegment(point: DrawingPoint, startPoint: DrawingPoint, endPoint: DrawingPoint): number {
-            const deltaX = endPoint.x - startPoint.x;
-            const deltaY = endPoint.y - startPoint.y;
-            const lengthSquared = deltaX * deltaX + deltaY * deltaY;
-            if (lengthSquared === 0) {
-                return Math.hypot(point.x - startPoint.x, point.y - startPoint.y);
-            }
-
-            const projection = Math.max(0, Math.min(1, ((point.x - startPoint.x) * deltaX + (point.y - startPoint.y) * deltaY) / lengthSquared));
-            const projectedX = startPoint.x + projection * deltaX;
-            const projectedY = startPoint.y + projection * deltaY;
-
-            return Math.hypot(point.x - projectedX, point.y - projectedY);
-        },
         deleteBackgroundPath(pathId: number) {
             this.backgroundPaths = this.backgroundPaths.filter((path) => path.id !== pathId);
             if (this.activeBackgroundPathId === pathId) {
@@ -1071,40 +1014,6 @@ export default defineComponent({
             if (window.confirm(this.$t('moduleoverview.ConfirmDeleteShape'))) {
                 this.deleteBackgroundPath(pathId);
             }
-        },
-        backgroundPointerPosition(event: PointerEvent): DrawingPoint {
-            const position = this.canvasPointerPosition(event);
-
-            return {
-                x: Math.max(0, Math.round(position.x)),
-                y: Math.max(0, Math.round(position.y)),
-            };
-        },
-        canvasPointerPosition(event: PointerEvent): DrawingPoint {
-            const canvas = this.$refs.canvas as HTMLElement;
-            const rect = canvas.getBoundingClientRect();
-
-            return {
-                x: (event.clientX - rect.left + canvas.scrollLeft) / this.zoomFactor,
-                y: (event.clientY - rect.top + canvas.scrollTop) / this.zoomFactor,
-            };
-        },
-        pathData(path: BackgroundPath): string {
-            const { points } = path;
-            if (points.length === 0) {
-                return '';
-            }
-
-            const firstPoint = points[0];
-            if (firstPoint === undefined) {
-                return '';
-            }
-
-            const commands = [`M ${firstPoint.x} ${firstPoint.y}`, ...points.slice(1).map((point) => `L ${point.x} ${point.y}`)];
-            return path.closed && this.isSamePoint(firstPoint, points[points.length - 1]) ? `${commands.join(' ')} Z` : commands.join(' ');
-        },
-        isSamePoint(firstPoint: DrawingPoint, secondPoint?: DrawingPoint): boolean {
-            return secondPoint !== undefined && firstPoint.x === secondPoint.x && firstPoint.y === secondPoint.y;
         },
         undoBackgroundPath() {
             const activePath = this.backgroundPaths.find((path) => path.id === this.activeBackgroundPathId);
@@ -1151,6 +1060,97 @@ export default defineComponent({
             this.activeBackgroundPathId = null;
             this.backgroundHoverPoint = null;
             this.clearBackgroundPointDragListeners();
+        },
+        findBackgroundClosingPointIndex(pathId: number, movedPointIndex: number, point: DrawingPoint): number | null {
+            const path = this.backgroundPaths.find((backgroundPath) => backgroundPath.id === pathId);
+            if (
+                path === undefined ||
+                path.closed ||
+                path.id !== this.activeBackgroundPathId ||
+                movedPointIndex !== path.points.length - 1 ||
+                path.points.length < 3
+            ) {
+                return null;
+            }
+
+            const closingPointIndex = path.points.findIndex((existingPoint, pointIndex) => {
+                if (pointIndex === movedPointIndex) {
+                    return false;
+                }
+
+                return Math.hypot(point.x - existingPoint.x, point.y - existingPoint.y) <= 8;
+            });
+
+            return closingPointIndex === -1 ? null : closingPointIndex;
+        },
+        findNearestBackgroundSegmentStartIndex(path: BackgroundPath, point: DrawingPoint): number | null {
+            let nearestSegmentStartIndex: number | null = null;
+            let nearestDistance = Number.POSITIVE_INFINITY;
+
+            for (let pointIndex = 0; pointIndex < path.points.length - 1; pointIndex += 1) {
+                const startPoint = path.points[pointIndex];
+                const endPoint = path.points[pointIndex + 1];
+                if (startPoint === undefined || endPoint === undefined) {
+                    continue;
+                }
+
+                const distance = this.distanceToSegment(point, startPoint, endPoint);
+                if (distance < nearestDistance) {
+                    nearestDistance = distance;
+                    nearestSegmentStartIndex = pointIndex;
+                }
+            }
+
+            const hitTolerance = Math.max(8, path.width + 4);
+            return nearestDistance <= hitTolerance ? nearestSegmentStartIndex : null;
+        },
+        distanceToSegment(point: DrawingPoint, startPoint: DrawingPoint, endPoint: DrawingPoint): number {
+            const deltaX = endPoint.x - startPoint.x;
+            const deltaY = endPoint.y - startPoint.y;
+            const lengthSquared = deltaX * deltaX + deltaY * deltaY;
+            if (lengthSquared === 0) {
+                return Math.hypot(point.x - startPoint.x, point.y - startPoint.y);
+            }
+
+            const projection = Math.max(0, Math.min(1, ((point.x - startPoint.x) * deltaX + (point.y - startPoint.y) * deltaY) / lengthSquared));
+            const projectedX = startPoint.x + projection * deltaX;
+            const projectedY = startPoint.y + projection * deltaY;
+
+            return Math.hypot(point.x - projectedX, point.y - projectedY);
+        },
+        backgroundPointerPosition(event: PointerEvent): DrawingPoint {
+            const position = this.canvasPointerPosition(event);
+
+            return {
+                x: Math.max(0, Math.round(position.x)),
+                y: Math.max(0, Math.round(position.y)),
+            };
+        },
+        canvasPointerPosition(event: PointerEvent): DrawingPoint {
+            const canvas = this.$refs.canvas as HTMLElement;
+            const rect = canvas.getBoundingClientRect();
+
+            return {
+                x: (event.clientX - rect.left + canvas.scrollLeft) / this.zoomFactor,
+                y: (event.clientY - rect.top + canvas.scrollTop) / this.zoomFactor,
+            };
+        },
+        pathData(path: BackgroundPath): string {
+            const { points } = path;
+            if (points.length === 0) {
+                return '';
+            }
+
+            const firstPoint = points[0];
+            if (firstPoint === undefined) {
+                return '';
+            }
+
+            const commands = [`M ${firstPoint.x} ${firstPoint.y}`, ...points.slice(1).map((point) => `L ${point.x} ${point.y}`)];
+            return path.closed && this.isSamePoint(firstPoint, points[points.length - 1]) ? `${commands.join(' ')} Z` : commands.join(' ');
+        },
+        isSamePoint(firstPoint: DrawingPoint, secondPoint?: DrawingPoint): boolean {
+            return secondPoint !== undefined && firstPoint.x === secondPoint.x && firstPoint.y === secondPoint.y;
         },
         heatmapValue(module: ModuleItem): number {
             if (this.heatmapMode === 'power' || this.heatmapMode === 'powerMax' || this.heatmapMode === 'powerDiff') {
