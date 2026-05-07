@@ -227,6 +227,7 @@ interface ModuleOverviewLayout {
     version: number;
     zoomFactor?: number;
     heatmapMode?: HeatmapMode;
+    showDisabledModules?: boolean;
     modules?: Array<{
         key: string;
         x: number;
@@ -562,6 +563,9 @@ export default defineComponent({
             if (this.isValidHeatmapMode(layout.heatmapMode)) {
                 this.heatmapMode = layout.heatmapMode;
             }
+            if (typeof layout.showDisabledModules === 'boolean') {
+                this.showDisabledModules = layout.showDisabledModules;
+            }
             this.backgroundPaths = this.normalizeBackgroundPaths(layout.backgroundPaths || []);
             this.backgroundPathSequence = Math.max(...this.backgroundPaths.map((path) => path.id), 0);
             this.activeBackgroundPathId = null;
@@ -604,17 +608,21 @@ export default defineComponent({
             this.layoutSaving = true;
 
             const formData = new FormData();
-            formData.append('data', JSON.stringify(this.buildLayout()));
+            const layoutBlob = new Blob([JSON.stringify(this.buildLayout())], { type: 'application/json' });
+            formData.append('module_overview', layoutBlob, MODULE_OVERVIEW_LAYOUT_FILE);
 
             fetch(`/api/file/upload?file=${MODULE_OVERVIEW_LAYOUT_FILE}`, {
                 method: 'POST',
                 headers: authHeader(),
                 body: formData,
             })
-                .then((response) => handleResponse(response, this.$emitter, this.$router))
-                .then((data) => {
-                    this.alert.message = this.$t('apiresponse.' + data.code, data.param);
-                    this.alert.type = data.type;
+                .then((response) => {
+                    if (!response.ok) {
+                        return handleResponse(response, this.$emitter, this.$router);
+                    }
+
+                    this.alert.message = this.$t('apiresponse.1001');
+                    this.alert.type = 'success';
                     this.alert.show = true;
                     waitRestart(this.$router);
                 })
@@ -627,6 +635,7 @@ export default defineComponent({
                 version: 1,
                 zoomFactor: this.zoomFactor,
                 heatmapMode: this.heatmapMode,
+                showDisabledModules: this.showDisabledModules,
                 modules: Object.entries(this.positions)
                     .filter(([key]) => this.modules.some((module) => module.key === key))
                     .map(([key, position]) => ({
@@ -697,14 +706,14 @@ export default defineComponent({
             this.ensureModulePositions();
         },
         ensureModulePositions() {
-            const nextPositions = {} as Record<string, ModulePosition>;
-            const occupiedPositions = new Set<string>();
+            const nextPositions = { ...this.positions } as Record<string, ModulePosition>;
+            const occupiedPositions = new Set(Object.values(nextPositions).map((position) => this.positionKey(position)));
 
             this.visibleModules.forEach((module, index) => {
                 const existingPosition = this.positions[module.key];
                 const existingPositionKey = existingPosition !== undefined ? this.positionKey(existingPosition) : '';
 
-                if (existingPosition !== undefined && !occupiedPositions.has(existingPositionKey)) {
+                if (existingPosition !== undefined) {
                     nextPositions[module.key] = existingPosition;
                     occupiedPositions.add(existingPositionKey);
                 } else {

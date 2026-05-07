@@ -75,9 +75,10 @@ Implementiert am 2026-05-07:
   - `version`
   - `zoomFactor`
   - `heatmapMode`
+  - `showDisabledModules`
   - Modulpositionen mit `key`, `x`, `y`
   - strukturierte SVG-Hintergrundpfade aus dem Editor
-- Nicht gespeichert werden Livewerte, Editiermodus oder Sichtbarkeit deaktivierter Module.
+- Nicht gespeichert werden Livewerte oder Editiermodus.
 - Der Upload nutzt `POST /api/file/upload?file=module_overview.json`.
 - Nach erfolgreichem Upload wird das vorhandene Restart-Wait-Verhalten verwendet.
 
@@ -88,6 +89,7 @@ Implementiert am 2026-05-07:
   "version": 1,
   "zoomFactor": 1,
   "heatmapMode": "none",
+  "showDisabledModules": false,
   "background": "module_overview.svg",
   "modules": [
     {
