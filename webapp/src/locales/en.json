@@ -59,6 +59,8 @@
         "Offline": "Offline",
         "EditMode": "Edit",
         "Arrange": "Arrange",
+        "SaveLayout": "Save",
+        "LoadLayoutFailed": "The saved module overview could not be loaded.",
         "DrawBackground": "Draw",
         "Undo": "Undo",
         "ClearBackground": "Clear background",

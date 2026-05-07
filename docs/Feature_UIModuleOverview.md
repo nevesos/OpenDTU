@@ -67,11 +67,27 @@ Konsequenz:
 - Alle Positionen gesammelt speichern, nur bei explizitem Klick auf `Speichern`.
 - Der Neustart nach Speichern ist akzeptiert.
 
+Implementiert am 2026-05-07:
+
+- Layout wird beim Oeffnen aus `module_overview.json` geladen.
+- Layout wird nur per explizitem Button `Speichern` geschrieben.
+- Gespeichert werden nur die fuer die Wiederherstellung notwendigen UI-Daten:
+  - `version`
+  - `zoomFactor`
+  - `heatmapMode`
+  - Modulpositionen mit `key`, `x`, `y`
+  - strukturierte SVG-Hintergrundpfade aus dem Editor
+- Nicht gespeichert werden Livewerte, Editiermodus oder Sichtbarkeit deaktivierter Module.
+- Der Upload nutzt `POST /api/file/upload?file=module_overview.json`.
+- Nach erfolgreichem Upload wird das vorhandene Restart-Wait-Verhalten verwendet.
+
 ## Vorgeschlagene Layout-JSON
 
 ```json
 {
   "version": 1,
+  "zoomFactor": 1,
+  "heatmapMode": "none",
   "background": "module_overview.svg",
   "modules": [
     {
@@ -138,15 +154,14 @@ Der Arbeitsbaum war vor dieser Notiz sauber. Es gab zu diesem Zeitpunkt keine lo
 
 ## Aktueller Implementierungsstand
 
-Stand nach erstem UI-Entwurf:
+Stand nach UI-Entwurf und erster Persistenz:
 
 - Neue View vorhanden: `webapp/src/views/ModuleOverviewView.vue`
 - Neue Route vorhanden: `/module-overview`
 - Menueeintrag neben `Live-Ansicht` vorhanden.
 - Locale-Texte in `de.json`, `en.json`, `fr.json` ergaenzt.
 - Keine Firmware-Aenderungen.
-- Keine Persistenz implementiert.
-- Keine Datei-API-Aufrufe fuer `module_overview.json`.
+- Persistenz fuer `module_overview.json` vorhanden.
 
 Die Moduluebersicht nutzt:
 
@@ -167,9 +182,9 @@ Die Module werden aus `inverters[].DC` erzeugt. Wichtiges Datenformat-Finding:
 - Editiermodus: Module per Pointer-Events frei verschieben.
 - Module rasten beim Verschieben auf ein 16px-Platzierungsraster ein.
 - Automatische Anordnung nutzt ebenfalls dieses Raster.
-- Positionen werden nur im Vue-State gehalten.
+- Positionen werden waehrend des Editierens nur im Vue-State gehalten.
 - Keine Speicherung beim Draggen.
-- Kein expliziter Speicherbutton vorhanden.
+- Expliziter Speicherbutton vorhanden.
 - Deaktivierte Module (`poll_enabled=false`) werden standardmaessig ausgeblendet.
 - Per Schalter `Deaktivierte anzeigen` koennen sie wieder eingeblendet werden.
 - Modulkarte zeigt sichtbar:
@@ -249,10 +264,9 @@ Technisches Modell:
 - `pathData(path)` baut daraus den SVG-`d`-String.
 - `backgroundSvgMarkup()` erzeugt bereits ein persistierbares SVG-Markup.
 - Vorschau-Linie und Griffpunkte werden nur in der UI gerendert und nicht in `backgroundSvgMarkup()` exportiert.
-- Noch keine Persistenz implementiert:
-  - kein Laden von `module_overview.svg`,
-  - kein Speichern nach LittleFS,
-  - kein Import/Export im UI.
+- Die Hintergrundpfade werden aktuell strukturiert in `module_overview.json` persistiert.
+- Kein separates Laden/Speichern von `module_overview.svg`.
+- Kein Import/Export im UI.
 
 Hinweis zur Architektur:
 
@@ -551,9 +565,7 @@ Fuer reines UI-Layout und Dragging reicht initial der GET-Mock. WebSocket `/live
    - gemeinsame Typen in `webapp/src/types/ModuleOverview.ts`
 4. Entscheiden, ob der Debug-Key dauerhaft sichtbar bleiben soll oder spaeter nur im Editier-/Debugmodus.
 5. Optional temporaere Layout-Sicherung in `localStorage` implementieren, ohne ESP-Restart.
-6. Persistenz erst danach implementieren:
-   - Layout laden: `GET /api/file/get?file=module_overview.json`
-   - Layout speichern nur per explizitem Button: `POST /api/file/upload?file=module_overview.json`
-   - SVG-Hintergrund laden/speichern: `module_overview.svg`
-   - Restart nach Upload bewusst behandeln.
-7. Danach `corepack yarn type-check` und `corepack yarn build-only` ausfuehren.
+6. Optional SVG-Hintergrund als separate Datei laden/speichern:
+   - `GET /api/file/get?file=module_overview.svg`
+   - `POST /api/file/upload?file=module_overview.svg`
+7. Debug-Key dauerhaft sichtbar lassen oder auf Editier-/Debugmodus begrenzen.

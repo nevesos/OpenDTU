@@ -8,6 +8,10 @@
         :showReload="true"
         @reload="reloadData"
     >
+        <BootstrapAlert v-model="alert.show" dismissible :variant="alert.type">
+            {{ alert.message }}
+        </BootstrapAlert>
+
         <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between mb-3">
             <div>
                 <span class="badge text-bg-secondary me-2">{{ $t('moduleoverview.Modules') }}: {{ visibleModules.length }}</span>
@@ -75,6 +79,9 @@
                     </button>
                     <button type="button" class="btn btn-outline-secondary" :disabled="!editMode" @click="arrangeModules">
                         <BIconGrid3x3Gap />&nbsp;{{ $t('moduleoverview.Arrange') }}
+                    </button>
+                    <button type="button" class="btn btn-primary" :disabled="!editMode || layoutSaving" @click="saveLayout">
+                        <BIconSave />&nbsp;{{ $t('moduleoverview.SaveLayout') }}
                     </button>
                 </div>
             </div>
@@ -175,10 +182,12 @@
 <script lang="ts">
 import BasePage from '@/components/BasePage.vue';
 import BootstrapAlert from '@/components/BootstrapAlert.vue';
+import type { AlertResponse } from '@/types/AlertResponse';
 import type { Inverter, InverterStatistics, LiveData, ValueObject } from '@/types/LiveDataStatus';
 import { authHeader, authUrl, handleResponse } from '@/utils/authentication';
+import { waitRestart } from '@/utils/waitRestart';
 import WebSocketService from '@/utils/websocketService';
-import { BIconArrowCounterclockwise, BIconBrush, BIconGrid3x3Gap, BIconPencilSquare, BIconTrash } from 'bootstrap-icons-vue';
+import { BIconArrowCounterclockwise, BIconBrush, BIconGrid3x3Gap, BIconPencilSquare, BIconSave, BIconTrash } from 'bootstrap-icons-vue';
 import type { CSSProperties } from 'vue';
 import { defineComponent } from 'vue';
 
@@ -214,6 +223,18 @@ interface BackgroundPreviewLine {
     width: number;
 }
 
+interface ModuleOverviewLayout {
+    version: number;
+    zoomFactor?: number;
+    heatmapMode?: HeatmapMode;
+    modules?: Array<{
+        key: string;
+        x: number;
+        y: number;
+    }>;
+    backgroundPaths?: BackgroundPath[];
+}
+
 const MODULE_WIDTH = 150;
 const MODULE_HEIGHT = 250;
 const MODULE_GAP = 18;
@@ -223,6 +244,7 @@ const CANVAS_MIN_HEIGHT = 320;
 const CANVAS_MIN_VIEWPORT_HEIGHT = 320;
 const CANVAS_BOTTOM_GAP = 16;
 const CANVAS_VERTICAL_OVERFLOW_TOLERANCE = 24;
+const MODULE_OVERVIEW_LAYOUT_FILE = 'module_overview.json';
 
 interface ModuleItem {
     key: string;
@@ -249,12 +271,15 @@ export default defineComponent({
         BootstrapAlert,
         BIconGrid3x3Gap,
         BIconPencilSquare,
+        BIconSave,
         BIconTrash,
     },
     data() {
         return {
             socket: {} as WebSocketService,
             dataLoading: true,
+            layoutSaving: false,
+            alert: {} as AlertResponse,
             liveData: { inverters: [] } as unknown as LiveData,
             isWebsocketConnected: false,
             editMode: false,
@@ -291,6 +316,7 @@ export default defineComponent({
         };
     },
     created() {
+        this.loadLayout();
         this.getInitialData();
         this.initSocket();
     },
@@ -485,6 +511,140 @@ export default defineComponent({
                         this.dataLoading = false;
                     }
                 });
+        },
+        loadLayout() {
+            fetch(`/api/file/get?file=${MODULE_OVERVIEW_LAYOUT_FILE}`, { headers: authHeader() })
+                .then((response) => {
+                    if (response.status === 404) {
+                        return null;
+                    }
+                    if (!response.ok) {
+                        return handleResponse(response, this.$emitter, this.$router, true);
+                    }
+                    return response.json();
+                })
+                .then((layout: ModuleOverviewLayout | null) => {
+                    if (layout === null) {
+                        return;
+                    }
+                    this.applyLayout(layout);
+                })
+                .catch(() => {
+                    this.alert.message = this.$t('moduleoverview.LoadLayoutFailed');
+                    this.alert.type = 'warning';
+                    this.alert.show = true;
+                });
+        },
+        applyLayout(layout: ModuleOverviewLayout) {
+            if (layout.version !== 1) {
+                return;
+            }
+
+            const positions = {} as Record<string, ModulePosition>;
+            (layout.modules || []).forEach((module) => {
+                if (typeof module.key !== 'string' || !Number.isFinite(module.x) || !Number.isFinite(module.y)) {
+                    return;
+                }
+
+                positions[module.key] = {
+                    x: Math.max(0, this.snapToGrid(module.x)),
+                    y: Math.max(0, this.snapToGrid(module.y)),
+                };
+            });
+
+            this.positions = {
+                ...this.positions,
+                ...positions,
+            };
+            if (this.isValidZoomFactor(layout.zoomFactor)) {
+                this.zoomFactor = layout.zoomFactor;
+            }
+            if (this.isValidHeatmapMode(layout.heatmapMode)) {
+                this.heatmapMode = layout.heatmapMode;
+            }
+            this.backgroundPaths = this.normalizeBackgroundPaths(layout.backgroundPaths || []);
+            this.backgroundPathSequence = Math.max(...this.backgroundPaths.map((path) => path.id), 0);
+            this.activeBackgroundPathId = null;
+            this.backgroundHoverPoint = null;
+            if (this.modules.length > 0) {
+                this.ensureModulePositions();
+            }
+        },
+        normalizeBackgroundPaths(paths: BackgroundPath[]): BackgroundPath[] {
+            return paths
+                .filter((path) => Number.isFinite(path.id) && Array.isArray(path.points) && path.points.length > 0)
+                .map((path) => ({
+                    id: Math.trunc(path.id),
+                    color: typeof path.color === 'string' ? path.color : '#5b8def',
+                    width: Number.isFinite(path.width) ? Math.max(1, Math.trunc(path.width)) : 4,
+                    closed: path.closed === true,
+                    points: path.points
+                        .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
+                        .map((point) => ({
+                            x: Math.max(0, Math.round(point.x)),
+                            y: Math.max(0, Math.round(point.y)),
+                        })),
+                }))
+                .filter((path) => path.points.length > 0);
+        },
+        isValidZoomFactor(zoomFactor?: number): zoomFactor is number {
+            return zoomFactor === 0.5 || zoomFactor === 0.75 || zoomFactor === 1 || zoomFactor === 1.25 || zoomFactor === 1.5;
+        },
+        isValidHeatmapMode(heatmapMode?: HeatmapMode): heatmapMode is HeatmapMode {
+            return (
+                heatmapMode === 'none' ||
+                heatmapMode === 'power' ||
+                heatmapMode === 'powerMax' ||
+                heatmapMode === 'powerDiff' ||
+                heatmapMode === 'yieldDay' ||
+                heatmapMode === 'yieldDayDiff'
+            );
+        },
+        saveLayout() {
+            this.layoutSaving = true;
+
+            const formData = new FormData();
+            formData.append('data', JSON.stringify(this.buildLayout()));
+
+            fetch(`/api/file/upload?file=${MODULE_OVERVIEW_LAYOUT_FILE}`, {
+                method: 'POST',
+                headers: authHeader(),
+                body: formData,
+            })
+                .then((response) => handleResponse(response, this.$emitter, this.$router))
+                .then((data) => {
+                    this.alert.message = this.$t('apiresponse.' + data.code, data.param);
+                    this.alert.type = data.type;
+                    this.alert.show = true;
+                    waitRestart(this.$router);
+                })
+                .finally(() => {
+                    this.layoutSaving = false;
+                });
+        },
+        buildLayout(): ModuleOverviewLayout {
+            return {
+                version: 1,
+                zoomFactor: this.zoomFactor,
+                heatmapMode: this.heatmapMode,
+                modules: Object.entries(this.positions)
+                    .filter(([key]) => this.modules.some((module) => module.key === key))
+                    .map(([key, position]) => ({
+                        key,
+                        x: Math.round(position.x),
+                        y: Math.round(position.y),
+                    })),
+                backgroundPaths: this.backgroundPaths.map((path) => ({
+                    id: path.id,
+                    color: path.color,
+                    width: path.width,
+                    closed: path.closed,
+                    points: path.points.map((point) => ({
+                        x: Math.round(point.x),
+                        y: Math.round(point.y),
+                    })),
+                })),
+            };
         },
         reloadData() {
             this.socket?.close();

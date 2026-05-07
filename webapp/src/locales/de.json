@@ -59,6 +59,8 @@
         "Offline": "Offline",
         "EditMode": "Bearbeiten",
         "Arrange": "Anordnen",
+        "SaveLayout": "Speichern",
+        "LoadLayoutFailed": "Die gespeicherte Modulübersicht konnte nicht geladen werden.",
         "DrawBackground": "Zeichnen",
         "Undo": "Rückgängig",
         "ClearBackground": "Hintergrund löschen",

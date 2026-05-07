@@ -59,6 +59,8 @@
         "Offline": "Hors ligne",
         "EditMode": "Modifier",
         "Arrange": "Disposer",
+        "SaveLayout": "Sauvegarder",
+        "LoadLayoutFailed": "La vue des modules enregistree n'a pas pu etre chargee.",
         "DrawBackground": "Dessiner",
         "Undo": "Annuler",
         "ClearBackground": "Effacer le fond",
