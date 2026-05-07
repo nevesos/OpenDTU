@@ -13,10 +13,29 @@
         </BootstrapAlert>
 
         <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between mb-3">
-            <div>
-                <span class="badge text-bg-secondary me-2">{{ $t('moduleoverview.Modules') }}: {{ visibleModules.length }}</span>
-                <span class="badge text-bg-success me-2">{{ $t('moduleoverview.Producing') }}: {{ producingCount }}</span>
-                <span class="badge text-bg-danger">{{ $t('moduleoverview.Offline') }}: {{ offlineCount }}</span>
+            <div class="d-flex flex-wrap gap-2 align-items-center module-overview-status-row">
+                <InverterTotalInfo v-if="liveData.total" :totalData="liveData.total" class="module-overview-row-totals" />
+                <div class="module-overview-status-badges">
+                    <div class="card module-overview-status-card">
+                        <div class="card-header text-bg-secondary">{{ $t('moduleoverview.Modules') }}</div>
+                        <div class="card-body card-text">
+                            <div class="module-overview-status-values">
+                                <div class="module-overview-status-value">
+                                    <span>{{ $t('moduleoverview.Modules') }}</span>
+                                    <strong>{{ visibleModules.length }}</strong>
+                                </div>
+                                <div class="module-overview-status-value">
+                                    <span>{{ $t('moduleoverview.Producing') }}</span>
+                                    <strong>{{ producingCount }}</strong>
+                                </div>
+                                <div class="module-overview-status-value">
+                                    <span>{{ $t('moduleoverview.Offline') }}</span>
+                                    <strong>{{ offlineCount }}</strong>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
             <div class="d-flex flex-wrap gap-2 align-items-center">
                 <div class="form-check form-switch mb-0">
@@ -182,6 +201,7 @@
 <script lang="ts">
 import BasePage from '@/components/BasePage.vue';
 import BootstrapAlert from '@/components/BootstrapAlert.vue';
+import InverterTotalInfo from '@/components/InverterTotalInfo.vue';
 import type { AlertResponse } from '@/types/AlertResponse';
 import type { Inverter, InverterStatistics, LiveData, ValueObject } from '@/types/LiveDataStatus';
 import { authHeader, authUrl, handleResponse } from '@/utils/authentication';
@@ -271,6 +291,7 @@ export default defineComponent({
         BIconBrush,
         BootstrapAlert,
         BIconGrid3x3Gap,
+        InverterTotalInfo,
         BIconPencilSquare,
         BIconSave,
         BIconTrash,
@@ -1332,6 +1353,75 @@ export default defineComponent({
 </script>
 
 <style scoped>
+.module-overview-status-row {
+    flex: 1 1 48rem;
+}
+
+.module-overview-status-badges {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: stretch;
+}
+
+.module-overview-status-card {
+    width: 20rem;
+}
+
+.module-overview-status-card .card-body {
+    padding: 0.45rem 0.75rem;
+}
+
+.module-overview-status-values {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.5rem;
+}
+
+.module-overview-status-value span,
+.module-overview-status-value strong {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.module-overview-status-value {
+    display: flex;
+    gap: 0.35rem;
+    align-items: baseline;
+    justify-content: center;
+}
+
+.module-overview-status-value span {
+    color: var(--bs-secondary-color);
+    font-size: 0.75rem;
+}
+
+.module-overview-status-value strong {
+    font-size: 1.25rem;
+    line-height: 1.2;
+}
+
+.module-overview-row-totals {
+    flex: 1 1 42rem;
+    max-width: 52rem;
+    min-width: 32rem;
+}
+
+.module-overview-row-totals :deep(.row) {
+    --bs-gutter-x: 0.5rem;
+    --bs-gutter-y: 0.5rem;
+}
+
+.module-overview-row-totals :deep(.card-body) {
+    padding: 0.45rem 0.75rem;
+}
+
+.module-overview-row-totals :deep(h2) {
+    margin-bottom: 0;
+    font-size: 1.25rem;
+}
+
 .module-overview-canvas {
     position: relative;
     overflow-x: auto;
@@ -1508,5 +1598,22 @@ export default defineComponent({
     font-size: 0.68rem;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+@media (max-width: 767.98px) {
+    .module-overview-status-row,
+    .module-overview-row-totals {
+        flex-basis: 100%;
+        min-width: 100%;
+        max-width: none;
+    }
+
+    .module-overview-status-badges {
+        flex: 1 1 100%;
+    }
+
+    .module-overview-status-card {
+        width: 100%;
+    }
 }
 </style>
