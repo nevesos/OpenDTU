@@ -93,13 +93,13 @@
                     />
                 </div>
                 <div class="btn-group" role="group">
-                    <button type="button" class="btn btn-outline-primary" :class="{ active: editMode }" @click="toggleEditMode">
+                    <button type="button" class="btn btn-outline-primary" :class="{ active: editMode }" :disabled="!isLogged" @click="toggleEditMode">
                         <BIconPencilSquare />&nbsp;{{ $t('moduleoverview.EditMode') }}
                     </button>
                     <button type="button" class="btn btn-outline-secondary" :disabled="!editMode" @click="arrangeModules">
                         <BIconGrid3x3Gap />&nbsp;{{ $t('moduleoverview.Arrange') }}
                     </button>
-                    <button type="button" class="btn btn-primary" :disabled="!editMode || layoutSaving" @click="saveLayout">
+                    <button type="button" class="btn btn-primary" :disabled="!isLogged || !editMode || layoutSaving" @click="saveLayout">
                         <BIconSave />&nbsp;{{ $t('moduleoverview.SaveLayout') }}
                     </button>
                 </div>
@@ -208,7 +208,7 @@ import BootstrapAlert from '@/components/BootstrapAlert.vue';
 import InverterTotalInfo from '@/components/InverterTotalInfo.vue';
 import type { AlertResponse } from '@/types/AlertResponse';
 import type { Inverter, InverterStatistics, LiveData, ValueObject } from '@/types/LiveDataStatus';
-import { authHeader, authUrl, handleResponse } from '@/utils/authentication';
+import { authHeader, authUrl, handleResponse, isLoggedIn } from '@/utils/authentication';
 import { waitRestart } from '@/utils/waitRestart';
 import WebSocketService from '@/utils/websocketService';
 import { BIconArrowCounterclockwise, BIconBrush, BIconGrid3x3Gap, BIconPencilSquare, BIconSave, BIconTrash } from 'bootstrap-icons-vue';
@@ -305,6 +305,7 @@ export default defineComponent({
             socket: {} as WebSocketService,
             dataLoading: true,
             layoutSaving: false,
+            isLogged: isLoggedIn(),
             alert: {} as AlertResponse,
             liveData: { inverters: [] } as unknown as LiveData,
             isWebsocketConnected: false,
@@ -345,6 +346,12 @@ export default defineComponent({
         this.loadLayout();
         this.getInitialData();
         this.initSocket();
+        this.$emitter.on('logged-in', () => {
+            this.isLogged = isLoggedIn();
+        });
+        this.$emitter.on('logged-out', () => {
+            this.isLogged = isLoggedIn();
+        });
     },
     mounted() {
         window.addEventListener('keydown', this.onBackgroundKeyDown);
