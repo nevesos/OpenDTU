@@ -70,6 +70,7 @@
         "HeatmapPower": "Heatmap: Leistung",
         "HeatmapPowerMax": "Heatmap: Leistung / Maximum",
         "HeatmapYieldDay": "Heatmap: Tagesertrag",
+        "Zoom": "Zoom",
         "NoModules": "Keine Modulwerte gefunden.",
         "Channel": "Kanal {channel}"
     },
