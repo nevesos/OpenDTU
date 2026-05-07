@@ -38,17 +38,6 @@
                 </div>
             </div>
             <div class="d-flex flex-wrap gap-2 align-items-center">
-                <div class="form-check form-switch mb-0">
-                    <input
-                        id="showDisabledModules"
-                        v-model="showDisabledModules"
-                        class="form-check-input"
-                        type="checkbox"
-                    />
-                    <label class="form-check-label" for="showDisabledModules">
-                        {{ $t('moduleoverview.ShowDisabled') }}
-                    </label>
-                </div>
                 <select v-model="heatmapMode" class="form-select form-select-sm module-overview-select">
                     <option value="none">{{ $t('moduleoverview.HeatmapNone') }}</option>
                     <option value="power">{{ $t('moduleoverview.HeatmapPower') }}</option>
@@ -64,6 +53,17 @@
                     <option :value="1.25">125%</option>
                     <option :value="1.5">150%</option>
                 </select>
+                <div class="form-check form-switch mb-0">
+                    <input
+                        id="showDisabledModules"
+                        v-model="showDisabledModules"
+                        class="form-check-input"
+                        type="checkbox"
+                    />
+                    <label class="form-check-label" for="showDisabledModules">
+                        {{ $t('moduleoverview.ShowDisabled') }}
+                    </label>
+                </div>
                 <div class="btn-group" role="group">
                     <button
                         type="button"
@@ -119,7 +119,11 @@
         >
             <div class="module-overview-zoom-spacer" :style="{ width: `${scaledCanvasWidth}px`, height: `${scaledCanvasHeight}px` }">
                 <div class="module-overview-workspace" :style="workspaceStyle">
-                    <div class="module-overview-grid" :style="{ width: `${canvasWidth}px`, height: `${canvasHeight}px` }"></div>
+                    <div
+                        v-if="editMode"
+                        class="module-overview-grid"
+                        :style="{ width: `${canvasWidth}px`, height: `${canvasHeight}px` }"
+                    ></div>
                     <svg
                         ref="backgroundSvg"
                         class="module-overview-background"
