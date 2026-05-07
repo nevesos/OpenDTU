@@ -10,6 +10,7 @@ import InverterAdminView from '@/views/InverterAdminView.vue';
 import LoginView from '@/views/LoginView.vue';
 import MaintenanceRebootView from '@/views/MaintenanceRebootView.vue';
 import LoggingAdminView from '@/views/LoggingAdminView.vue';
+import ModuleOverviewView from '@/views/ModuleOverviewView.vue';
 import MqttAdminView from '@/views/MqttAdminView.vue';
 import MqttInfoView from '@/views/MqttInfoView.vue';
 import NetworkAdminView from '@/views/NetworkAdminView.vue';
@@ -36,6 +37,11 @@ const router = createRouter({
             path: '/',
             name: 'Home',
             component: HomeView,
+        },
+        {
+            path: '/module-overview',
+            name: 'Module Overview',
+            component: ModuleOverviewView,
         },
         {
             path: '/login',

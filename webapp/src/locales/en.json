@@ -1,6 +1,7 @@
 {
     "menu": {
         "LiveView": "Live View",
+        "ModuleOverview": "Module Overview",
         "Settings": "Settings",
         "NetworkSettings": "Network Settings",
         "NTPSettings": "NTP Settings",
@@ -50,6 +51,16 @@
     "dataagedisplay": {
         "DataAge": "Data Age",
         "SecondsSince": "0 seconds | 1 second | {n} seconds"
+    },
+    "moduleoverview": {
+        "Title": "Module Overview",
+        "Modules": "Modules",
+        "Producing": "Producing",
+        "Offline": "Offline",
+        "EditMode": "Edit",
+        "Arrange": "Arrange",
+        "NoModules": "No module values found.",
+        "Channel": "Channel {channel}"
     },
     "apiresponse": {
         "1001": "Settings saved!",
