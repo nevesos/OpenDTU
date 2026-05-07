@@ -34,22 +34,25 @@ Pro Wechselrichter stehen Modul-/Stringdaten unter `liveData.inverters[].DC[]` z
 - `YieldTotal`
 - `Irradiation`
 
-## Geplanter Implementierungsansatz
+## Implementierungsansatz
 
 - Keine Aenderung an Firmware-Livedaten.
 - Keine Aenderung an `Configuration.h` / `Configuration.cpp`.
-- Neue Webapp-Ansicht statt Umbau von `HomeView.vue`, zum Beispiel:
+- Neue Webapp-Ansicht statt Umbau von `HomeView.vue`:
   - `webapp/src/views/ModuleOverviewView.vue`
-- Neue Route, zum Beispiel:
+- Neue Route:
   - `/module-overview`
 - Neuer Menueeintrag neben der bestehenden Live-Ansicht.
 - Die neue Ansicht nutzt dieselbe Datenquelle wie `HomeView.vue`:
   - `GET /api/livedata/status`
   - WebSocket `/livedata`
+- Firmware-Aenderung nur in `src/WebApi_file.cpp`:
+  - `module_overview.json` ist fuer lesenden Zugriff explizit freigegeben.
+  - Die Freigabe ist absichtlich eng gehalten, damit die generische Datei-API keine sensiblen Dateien lesend freigibt.
 
 ## Persistenz
 
-Fuer minimale Firmware-Aenderungen soll die bestehende Datei-API genutzt werden:
+Fuer die Persistenz wird die bestehende Datei-API genutzt:
 
 - Layout laden: `GET /api/file/get?file=module_overview.json`
 - Layout speichern: `POST /api/file/upload?file=module_overview.json`
@@ -58,6 +61,17 @@ Fuer minimale Firmware-Aenderungen soll die bestehende Datei-API genutzt werden:
   - `POST /api/file/upload?file=module_overview.svg`
 
 Wichtig: Die bestehende Upload-API in `src/WebApi_file.cpp` schreibt nach LittleFS und ruft nach Upload `RestartHelper.triggerRestart()` auf.
+
+Aktueller API-Stand:
+
+- `GET /api/file/get?file=module_overview.json`
+  - liefert `404`, wenn die Datei noch nicht existiert.
+  - nutzt fuer diese Datei `WebApi.checkCredentialsReadonly(...)`.
+  - alle anderen Dateien bleiben wie bisher hinter Schreib-/Admin-Credentials.
+- `POST /api/file/upload?file=module_overview.json`
+  - nutzt weiterhin `WebApi.checkCredentials(...)`.
+  - schreibt die Datei nach LittleFS.
+  - triggert danach weiterhin einen Neustart.
 
 Konsequenz:
 
@@ -82,7 +96,7 @@ Implementiert am 2026-05-07:
 - Der Upload nutzt `POST /api/file/upload?file=module_overview.json`.
 - Nach erfolgreichem Upload wird das vorhandene Restart-Wait-Verhalten verwendet.
 
-## Vorgeschlagene Layout-JSON
+## Aktuelle Layout-JSON
 
 ```json
 {
@@ -90,40 +104,59 @@ Implementiert am 2026-05-07:
   "zoomFactor": 1,
   "heatmapMode": "none",
   "showDisabledModules": false,
-  "background": "module_overview.svg",
   "modules": [
     {
       "key": "123456789012:DC:0",
       "x": 120,
       "y": 80
     }
+  ],
+  "backgroundPaths": [
+    {
+      "id": 1,
+      "color": "#5b8def",
+      "width": 4,
+      "closed": false,
+      "points": [
+        { "x": 32, "y": 32 },
+        { "x": 180, "y": 96 }
+      ]
+    }
   ]
 }
 ```
 
-Zum Start kann `background` weggelassen oder ignoriert werden. Eine separate SVG-Datei kann spaeter ergaenzt werden.
+Eine separate SVG-Datei wird aktuell nicht geladen oder gespeichert. Die SVG-Zeichnung wird strukturiert als `backgroundPaths` in `module_overview.json` persistiert. `backgroundSvgMarkup()` kann daraus bereits SVG-Markup erzeugen, wird im UI aber nicht als Export verwendet.
 
-## UI-Plan
+## UI-Funktionsstand
 
 - Neue Ansicht mit Normalmodus und Editiermodus.
-- Im normalen Modus nur Anzeige.
+- Im normalen Modus Anzeige von Livewerten und Heatmap.
 - Im Editiermodus Module per Pointer-Events frei verschieben.
 - Keine neue Dependency noetig.
 - Modul-Key:
   - `serial + ':DC:' + channelIndex`
-- Kachel zeigt zum Beispiel:
+- Kachel zeigt:
   - Wechselrichtername
   - Kanalnummer
   - aktuelle Leistung
-  - optional Spannung, Strom, Tagesertrag
+  - Spannung
+  - Strom
+  - Tagesertrag
+  - Debug-ID / Modul-Key
 - Statusfarbe abgeleitet aus:
   - `poll_enabled`
   - `reachable`
   - `producing`
+- Status wird als Rahmenfarbe und Badge dargestellt:
+  - disabled: secondary
+  - offline: danger
+  - idle: warning
+  - producing: success
 - Klick auf `Speichern`:
   - JSON aus aktuellem Layout bauen
   - per `/api/file/upload?file=module_overview.json` hochladen
-  - danach bestehendes Neustart-/WaitRestart-Verhalten verwenden oder auf Reconnect warten
+  - danach bestehendes Neustart-/WaitRestart-Verhalten verwenden
 
 ## Minimal betroffene Webapp-Dateien
 
@@ -134,13 +167,18 @@ Zum Start kann `background` weggelassen oder ignoriert werden. Eine separate SVG
 - `webapp/src/locales/en.json`
 - `webapp/src/locales/fr.json`
 
-Moeglichst nicht anfassen:
+Nicht angefasst:
 
 - `src/WebApi_ws_live.cpp`
 - `src/WebApi_inverter.cpp`
 - `src/Configuration.cpp`
 - `include/Configuration.h`
 - `webapp/src/views/HomeView.vue`
+
+Minimal angefasst in der Firmware:
+
+- `src/WebApi_file.cpp`
+  - Readonly-Allowlist fuer `/module_overview.json`
 
 Eine spaetere Extraktion gemeinsamer LiveData-Logik ist moeglich, aber fuer den ersten minimalen Schritt nicht erforderlich.
 
@@ -156,13 +194,14 @@ Der Arbeitsbaum war vor dieser Notiz sauber. Es gab zu diesem Zeitpunkt keine lo
 
 ## Aktueller Implementierungsstand
 
-Stand nach UI-Entwurf und erster Persistenz:
+Stand 2026-05-07:
 
 - Neue View vorhanden: `webapp/src/views/ModuleOverviewView.vue`
 - Neue Route vorhanden: `/module-overview`
 - Menueeintrag neben `Live-Ansicht` vorhanden.
 - Locale-Texte in `de.json`, `en.json`, `fr.json` ergaenzt.
-- Keine Firmware-Aenderungen.
+- Firmware-Livedaten unveraendert.
+- `src/WebApi_file.cpp` enthaelt eine eng begrenzte Readonly-Freigabe fuer `/module_overview.json`.
 - Persistenz fuer `module_overview.json` vorhanden.
 
 Die Moduluebersicht nutzt:
@@ -171,12 +210,14 @@ Die Moduluebersicht nutzt:
 - Danach WebSocket `/livedata`
 - Modul-Key: `${serial}:DC:${channel}`
 
-Die Module werden aus `inverters[].DC` erzeugt. Wichtiges Datenformat-Finding:
+Die Module werden aus `inverters[].DC` erzeugt. Datenformat-Finding:
 
 - `GET /api/livedata/status` lieferte beim Test zunaechst nur Wechselrichter-Metadaten und `total`, aber keine `DC`-Daten.
 - Die `DC`-Daten kamen ueber WebSocket.
 - `DC` kommt in den Live-Daten als Objekt mit numerischen String-Keys, z. B. `"0"`, `"1"`, `"2"`, `"3"`, nicht zwingend als echtes Array.
 - Die View nutzt deshalb `Object.entries(inverter.DC || {})`.
+- WebSocket-Updates werden in `handleMessage(...)` in `liveData.total`, `liveData.hints` und den passenden Wechselrichter in `liveData.inverters` gemerged.
+- Neue Modulpositionen werden mit `ensureModulePositions()` kollisionsarm vergeben.
 
 ## Aktuelle UI-Funktionen
 
@@ -367,7 +408,9 @@ Die Moduluebersicht hat eine optionale Heatmap-Auswahl:
 - Keine Heatmap
 - Heatmap: Leistung
 - Heatmap: Leistung / Maximum
+- Heatmap: Leistungsdifferenz
 - Heatmap: Tagesertrag
+- Heatmap: Tagesertragsdifferenz
 
 Berechnung:
 
@@ -403,6 +446,18 @@ HM1500 mit 4 DC-Kanaelen: 1500 W / 4 = 375 W pro Modul
 
 Wenn weder `Power.max` noch ein sinnvoller Fallback vorhanden ist, wird im Modus `Leistung / Maximum` fuer dieses Modul keine Heatmap-Farbe gesetzt.
 
+Differenzmodi:
+
+- `Heatmap: Leistungsdifferenz` nutzt die aktuelle Leistung aller sichtbaren, aktivierten Module.
+- `Heatmap: Tagesertragsdifferenz` nutzt den Tagesertrag aller sichtbaren, aktivierten Module.
+- Die Skalierung laeuft jeweils ueber den Wertebereich der sichtbaren Module:
+
+```text
+ratio = (value - minimum) / (maximum - minimum)
+```
+
+- Wenn `minimum === maximum` oder keine Werte vorhanden sind, wird keine Heatmap-Farbe gesetzt.
+
 Die Farbe wird in `heatmapStyle(module)` per HSL berechnet:
 
 ```text
@@ -431,13 +486,31 @@ Niedrige Werte sind blaeulich/hell, hohe Werte gelblich/satter.
 - `ModuleOverviewView.vue` ist inzwischen gross und enthaelt Live-Daten, Modul-Dragging, SVG-Editor, Zoom und Hoehenlogik.
 - Naechste groessere Aenderung sollte eher extrahieren als weiter in dieser View wachsen.
 - Relevante Locale-Keys fuer die neuen UI-Elemente:
+  - `menu.ModuleOverview`
+  - `moduleoverview.Title`
+  - `moduleoverview.Modules`
+  - `moduleoverview.Producing`
+  - `moduleoverview.Offline`
+  - `moduleoverview.EditMode`
+  - `moduleoverview.Arrange`
+  - `moduleoverview.SaveLayout`
+  - `moduleoverview.LoadLayoutFailed`
   - `moduleoverview.DrawBackground`
   - `moduleoverview.Undo`
   - `moduleoverview.ClearBackground`
   - `moduleoverview.ConfirmDeleteShape`
   - `moduleoverview.DrawColor`
   - `moduleoverview.DrawWidth`
+  - `moduleoverview.ShowDisabled`
+  - `moduleoverview.HeatmapNone`
+  - `moduleoverview.HeatmapPower`
+  - `moduleoverview.HeatmapPowerMax`
+  - `moduleoverview.HeatmapPowerDiff`
+  - `moduleoverview.HeatmapYieldDay`
+  - `moduleoverview.HeatmapYieldDayDiff`
   - `moduleoverview.Zoom`
+  - `moduleoverview.NoModules`
+  - `moduleoverview.Channel`
 
 ## Aktuelle Verifikation
 
@@ -561,6 +634,7 @@ Fuer reines UI-Layout und Dragging reicht initial der GET-Mock. WebSocket `/live
    - Modul-Dragging bei Zoom != 100 %
    - scheinbare Duplikate anhand sichtbarer Modul-Keys bewerten
    - Heatmap-Modus `Leistung / Maximum` mit Fallbackwerten pruefen
+   - Heatmap-Differenzmodi mit echten Modulwerten pruefen
    - Bedienbarkeit auf kleinen Bildschirmen pruefen
 3. Vor weiterer Erweiterung SVG-Editor extrahieren:
    - `SvgBackgroundEditor.vue`
@@ -570,4 +644,3 @@ Fuer reines UI-Layout und Dragging reicht initial der GET-Mock. WebSocket `/live
 6. Optional SVG-Hintergrund als separate Datei laden/speichern:
    - `GET /api/file/get?file=module_overview.svg`
    - `POST /api/file/upload?file=module_overview.svg`
-7. Debug-Key dauerhaft sichtbar lassen oder auf Editier-/Debugmodus begrenzen.
