@@ -55,6 +55,7 @@ export interface ModuleItem {
     pollEnabled: boolean;
     reachable: boolean;
     producing: boolean;
+    hasLiveData: boolean;
     powerMaximum: number;
     Power?: ValueObject;
     Voltage?: ValueObject;

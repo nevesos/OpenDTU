@@ -338,6 +338,7 @@ export default defineComponent({
                                 pollEnabled: inverter.poll_enabled,
                                 reachable: inverter.reachable,
                                 producing: inverter.producing,
+                                hasLiveData: Object.prototype.hasOwnProperty.call(inverter, 'INV'),
                                 powerMaximum: channelData.Power?.max ?? fallbackPowerMaximum,
                                 Power: channelData.Power,
                                 Voltage: channelData.Voltage,
@@ -346,6 +347,29 @@ export default defineComponent({
                             });
                         });
                 });
+
+            Object.keys(this.positions).forEach((key) => {
+                if (modulesByKey.has(key)) {
+                    return;
+                }
+
+                const parsedKey = this.parseModuleKey(key);
+                if (parsedKey === null) {
+                    return;
+                }
+
+                modulesByKey.set(key, {
+                    key,
+                    inverterName: parsedKey.serial,
+                    serial: parsedKey.serial,
+                    channel: parsedKey.channel,
+                    pollEnabled: true,
+                    reachable: true,
+                    producing: false,
+                    hasLiveData: false,
+                    powerMaximum: 0,
+                });
+            });
 
             return Array.from(modulesByKey.values());
         },
@@ -656,6 +680,7 @@ export default defineComponent({
         ensureModulePositions() {
             const nextPositions = { ...this.positions } as Record<string, ModulePosition>;
             const occupiedPositions = new Set(Object.values(nextPositions).map((position) => this.positionKey(position)));
+            let positionsChanged = false;
 
             this.visibleModules.forEach((module, index) => {
                 const existingPosition = this.positions[module.key];
@@ -668,10 +693,13 @@ export default defineComponent({
                     const nextPosition = this.defaultPosition(index, occupiedPositions);
                     nextPositions[module.key] = nextPosition;
                     occupiedPositions.add(this.positionKey(nextPosition));
+                    positionsChanged = true;
                 }
             });
 
-            this.positions = nextPositions;
+            if (positionsChanged) {
+                this.positions = nextPositions;
+            }
         },
         defaultPosition(index: number, occupiedPositions: Set<string> = new Set()): ModulePosition {
             const stepX = this.snapToGrid(MODULE_WIDTH + MODULE_GAP);
@@ -701,6 +729,22 @@ export default defineComponent({
         },
         snapToGrid(value: number): number {
             return Math.round(value / PLACEMENT_GRID_SIZE) * PLACEMENT_GRID_SIZE;
+        },
+        parseModuleKey(key: string): { serial: string; channel: number } | null {
+            const match = key.match(/^(.+):DC:(\d+)$/);
+            if (match === null || match[1] === undefined || match[2] === undefined) {
+                return null;
+            }
+
+            const channel = Number(match[2]);
+            if (!Number.isFinite(channel)) {
+                return null;
+            }
+
+            return {
+                serial: match[1],
+                channel,
+            };
         },
         arrangeModules() {
             const nextPositions = {} as Record<string, ModulePosition>;

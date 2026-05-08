@@ -12,12 +12,20 @@
                 {{ $t('moduleoverview.Channel', { channel: module.channel + 1 }) }}
             </span>
         </div>
-        <div class="module-power">{{ formatValue(module.Power) }}</div>
-        <div class="module-values">
-            <span>{{ formatValue(module.Voltage) }}</span>
-            <span>{{ formatValue(module.Current) }}</span>
-            <span>{{ formatValue(module.YieldDay) }}</span>
+        <div v-if="!module.hasLiveData" class="module-card-loading">
+            <div class="spinner-border m-1" role="status">
+                <span class="visually-hidden">{{ $t('home.LoadingInverter') }}</span>
+            </div>
+            <span>{{ $t('home.LoadingInverter') }}</span>
         </div>
+        <template v-else>
+            <div class="module-power">{{ formatValue(module.Power) }}</div>
+            <div class="module-values">
+                <span>{{ formatValue(module.Voltage) }}</span>
+                <span>{{ formatValue(module.Current) }}</span>
+                <span>{{ formatValue(module.YieldDay) }}</span>
+            </div>
+        </template>
         <div class="module-key">{{ module.key }}</div>
     </div>
 </template>
@@ -86,6 +94,7 @@ export default defineComponent({
                 `poll_enabled: ${this.module.pollEnabled}`,
                 `reachable: ${this.module.reachable}`,
                 `producing: ${this.module.producing}`,
+                `hasLiveData: ${this.module.hasLiveData}`,
                 `powerMaximum: ${this.module.powerMaximum}`,
                 `Power: ${this.debugValue(this.module.Power)}`,
                 `Voltage: ${this.debugValue(this.module.Voltage)}`,
@@ -181,6 +190,20 @@ export default defineComponent({
     font-size: 1.35rem;
     font-weight: 700;
     line-height: 1.1;
+}
+
+.module-card-loading {
+    display: flex;
+    min-height: 120px;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 0.35rem;
+    padding: 0.75rem 0;
+    color: var(--bs-secondary-color);
+    font-size: 0.8rem;
+    line-height: 1.2;
+    text-align: center;
 }
 
 .module-values {
