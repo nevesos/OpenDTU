@@ -163,7 +163,7 @@
                             <div
                                 v-if="editMode"
                                 class="module-overview-grid"
-                                :style="{ width: `${canvasWidth}px`, height: `${canvasHeight}px` }"
+                                :style="{ width: `${gridWidth}px`, height: `${canvasHeight}px` }"
                             ></div>
                             <svg
                                 ref="backgroundSvg"
@@ -301,6 +301,7 @@ export default defineComponent({
             showDisabledModules: false,
             heatmapMode: 'none' as HeatmapMode,
             zoomFactor: 1,
+            canvasAvailableWidth: CANVAS_MIN_WIDTH,
             canvasAvailableHeight: CANVAS_MIN_VIEWPORT_HEIGHT,
             positions: {} as Record<string, ModulePosition>,
             backgroundDrawMode: false,
@@ -548,14 +549,19 @@ export default defineComponent({
             return Math.max(CANVAS_MIN_HEIGHT, visibleCanvasHeight, Math.ceil(maxModuleY), Math.ceil(maxPathY));
         },
         scaledCanvasWidth(): number {
-            return Math.ceil(this.canvasWidth * this.zoomFactor);
+            return Math.ceil(this.gridWidth * this.zoomFactor);
         },
         scaledCanvasHeight(): number {
             return Math.ceil(this.canvasHeight * this.zoomFactor);
         },
+        gridWidth(): number {
+            const visibleCanvasWidth = Math.ceil(this.canvasAvailableWidth / this.zoomFactor);
+
+            return Math.max(this.canvasWidth, visibleCanvasWidth);
+        },
         workspaceStyle() {
             return {
-                width: `${this.canvasWidth}px`,
+                width: `${this.gridWidth}px`,
                 height: `${this.canvasHeight}px`,
                 transform: `scale(${this.zoomFactor})`,
             };
@@ -641,7 +647,11 @@ export default defineComponent({
 
             const rect = canvas.getBoundingClientRect();
             const availableHeight = window.innerHeight - rect.top - CANVAS_BOTTOM_GAP;
+            const nextCanvasAvailableWidth = Math.max(CANVAS_MIN_WIDTH, Math.floor(canvas.clientWidth));
             const nextCanvasAvailableHeight = Math.max(CANVAS_MIN_VIEWPORT_HEIGHT, Math.floor(availableHeight));
+            if (this.canvasAvailableWidth !== nextCanvasAvailableWidth) {
+                this.canvasAvailableWidth = nextCanvasAvailableWidth;
+            }
             if (this.canvasAvailableHeight !== nextCanvasAvailableHeight) {
                 this.canvasAvailableHeight = nextCanvasAvailableHeight;
             }
