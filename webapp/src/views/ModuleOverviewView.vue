@@ -13,7 +13,11 @@
 
         <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between mb-3">
             <div class="d-flex flex-wrap gap-2 align-items-center module-overview-status-row">
-                <InverterTotalInfo v-if="liveData.total" :totalData="liveData.total" class="module-overview-row-totals" />
+                <InverterTotalInfo
+                    v-if="liveData.total"
+                    :totalData="liveData.total"
+                    class="module-overview-row-totals"
+                />
                 <div class="module-overview-status-badges">
                     <div class="card module-overview-status-card">
                         <div class="card-header text-bg-secondary">{{ $t('moduleoverview.Modules') }}</div>
