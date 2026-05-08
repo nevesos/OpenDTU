@@ -110,79 +110,92 @@
             {{ $t('moduleoverview.NoModules') }}
         </BootstrapAlert>
 
-        <div
-            v-if="visibleModules.length > 0"
-            ref="canvas"
-            class="module-overview-canvas"
-            :class="{ 'module-overview-canvas-edit': editMode }"
-            :style="canvasStyle"
-        >
-            <div class="module-overview-zoom-spacer" :style="{ width: `${scaledCanvasWidth}px`, height: `${scaledCanvasHeight}px` }">
-                <div class="module-overview-workspace" :style="workspaceStyle">
-                    <div
-                        v-if="editMode"
-                        class="module-overview-grid"
-                        :style="{ width: `${canvasWidth}px`, height: `${canvasHeight}px` }"
-                    ></div>
-                    <svg
-                        ref="backgroundSvg"
-                        class="module-overview-background"
-                        :class="{ 'module-overview-background-draw': editMode && backgroundDrawMode }"
-                        :width="canvasWidth"
-                        :height="canvasHeight"
-                        :viewBox="`0 0 ${canvasWidth} ${canvasHeight}`"
-                        @pointerdown="onBackgroundPointerDown"
-                        @pointermove="onBackgroundPointerMove"
-                        @pointerleave="onBackgroundPointerLeave"
-                    >
-                        <path
-                            v-for="path in backgroundPaths"
-                            :key="path.id"
-                            class="module-overview-background-path"
-                            :d="pathData(path)"
-                            :stroke="path.color"
-                            :stroke-width="path.width"
-                            fill="none"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            @pointerdown.stop="onBackgroundPathPointerDown($event, path.id)"
-                            @contextmenu.prevent="confirmDeleteBackgroundPath(path.id)"
-                        />
-                        <line
-                            v-if="backgroundPreviewLine !== null"
-                            class="module-overview-background-preview"
-                            :x1="backgroundPreviewLine.x1"
-                            :y1="backgroundPreviewLine.y1"
-                            :x2="backgroundPreviewLine.x2"
-                            :y2="backgroundPreviewLine.y2"
-                            :stroke="backgroundPreviewLine.color"
-                            :stroke-width="backgroundPreviewLine.width"
-                            stroke-linecap="round"
-                        />
-                        <template v-if="editMode && backgroundDrawMode">
-                            <circle
-                                v-for="point in backgroundControlPoints"
-                                :key="`${point.pathId}:${point.pointIndex}`"
-                                class="module-overview-background-point"
-                                :class="{ 'module-overview-background-point-active': point.pathId === activeBackgroundPathId }"
-                                :cx="point.x"
-                                :cy="point.y"
-                                r="5"
-                                @pointerdown.stop="onBackgroundPointPointerDown($event, point.pathId, point.pointIndex)"
-                                @contextmenu.prevent="confirmDeleteBackgroundPath(point.pathId)"
+        <div v-if="visibleModules.length > 0" class="row gy-3">
+            <div class="col-sm-3 col-md-2" :style="[inverterData.length <= 1 ? { display: 'none' } : {}]">
+                <InverterSideNav v-model="selectedInverterSerial" :inverters="inverterData" @select="selectInverter" />
+            </div>
+
+            <div
+                :class="{
+                    'col-sm-9 col-md-10': inverterData.length > 1,
+                    'col-sm-12 col-md-12': inverterData.length <= 1,
+                }"
+            >
+                <div
+                    ref="canvas"
+                    class="module-overview-canvas"
+                    :class="{ 'module-overview-canvas-edit': editMode }"
+                    :style="canvasStyle"
+                >
+                    <div class="module-overview-zoom-spacer" :style="{ width: `${scaledCanvasWidth}px`, height: `${scaledCanvasHeight}px` }">
+                        <div class="module-overview-workspace" :style="workspaceStyle">
+                            <div
+                                v-if="editMode"
+                                class="module-overview-grid"
+                                :style="{ width: `${canvasWidth}px`, height: `${canvasHeight}px` }"
+                            ></div>
+                            <svg
+                                ref="backgroundSvg"
+                                class="module-overview-background"
+                                :class="{ 'module-overview-background-draw': editMode && backgroundDrawMode }"
+                                :width="canvasWidth"
+                                :height="canvasHeight"
+                                :viewBox="`0 0 ${canvasWidth} ${canvasHeight}`"
+                                @pointerdown="onBackgroundPointerDown"
+                                @pointermove="onBackgroundPointerMove"
+                                @pointerleave="onBackgroundPointerLeave"
+                            >
+                                <path
+                                    v-for="path in backgroundPaths"
+                                    :key="path.id"
+                                    class="module-overview-background-path"
+                                    :d="pathData(path)"
+                                    :stroke="path.color"
+                                    :stroke-width="path.width"
+                                    fill="none"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    @pointerdown.stop="onBackgroundPathPointerDown($event, path.id)"
+                                    @contextmenu.prevent="confirmDeleteBackgroundPath(path.id)"
+                                />
+                                <line
+                                    v-if="backgroundPreviewLine !== null"
+                                    class="module-overview-background-preview"
+                                    :x1="backgroundPreviewLine.x1"
+                                    :y1="backgroundPreviewLine.y1"
+                                    :x2="backgroundPreviewLine.x2"
+                                    :y2="backgroundPreviewLine.y2"
+                                    :stroke="backgroundPreviewLine.color"
+                                    :stroke-width="backgroundPreviewLine.width"
+                                    stroke-linecap="round"
+                                />
+                                <template v-if="editMode && backgroundDrawMode">
+                                    <circle
+                                        v-for="point in backgroundControlPoints"
+                                        :key="`${point.pathId}:${point.pointIndex}`"
+                                        class="module-overview-background-point"
+                                        :class="{ 'module-overview-background-point-active': point.pathId === activeBackgroundPathId }"
+                                        :cx="point.x"
+                                        :cy="point.y"
+                                        r="5"
+                                        @pointerdown.stop="onBackgroundPointPointerDown($event, point.pathId, point.pointIndex)"
+                                        @contextmenu.prevent="confirmDeleteBackgroundPath(point.pathId)"
+                                    />
+                                </template>
+                            </svg>
+                            <ModuleCard
+                                v-for="module in visibleModules"
+                                :key="module.key"
+                                :module="module"
+                                :position="positions[module.key]"
+                                :editMode="editMode"
+                                :isDragging="dragState?.key === module.key"
+                                :isSelected="module.serial === selectedInverterSerial"
+                                :heatmapStyle="heatmapStyle(module)"
+                                @pointerdown="onPointerDown($event, module.key)"
                             />
-                        </template>
-                    </svg>
-                    <ModuleCard
-                        v-for="module in visibleModules"
-                        :key="module.key"
-                        :module="module"
-                        :position="positions[module.key]"
-                        :editMode="editMode"
-                        :isDragging="dragState?.key === module.key"
-                        :heatmapStyle="heatmapStyle(module)"
-                        @pointerdown="onPointerDown($event, module.key)"
-                    />
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -192,6 +205,7 @@
 <script lang="ts">
 import BasePage from '@/components/BasePage.vue';
 import BootstrapAlert from '@/components/BootstrapAlert.vue';
+import InverterSideNav from '@/components/InverterSideNav.vue';
 import InverterTotalInfo from '@/components/InverterTotalInfo.vue';
 import ModuleCard from '@/components/ModuleCard.vue';
 import type { AlertResponse } from '@/types/AlertResponse';
@@ -231,6 +245,7 @@ export default defineComponent({
         BIconBrush,
         BootstrapAlert,
         BIconGrid3x3Gap,
+        InverterSideNav,
         InverterTotalInfo,
         ModuleCard,
         BIconPencilSquare,
@@ -247,6 +262,7 @@ export default defineComponent({
             liveData: { inverters: [] } as unknown as LiveData,
             isWebsocketConnected: false,
             editMode: false,
+            selectedInverterSerial: null as string | null,
             showDisabledModules: false,
             heatmapMode: 'none' as HeatmapMode,
             zoomFactor: 1,
@@ -307,9 +323,13 @@ export default defineComponent({
         visibleModules() {
             this.ensureModulePositions();
             this.updateCanvasAvailableHeightAfterRender();
+            this.scrollToSelectedInverterAfterRender();
         },
     },
     computed: {
+        inverterData(): Inverter[] {
+            return (this.liveData.inverters || []).slice().sort((a: Inverter, b: Inverter) => a.order - b.order);
+        },
         modules(): ModuleItem[] {
             const modulesByKey = new Map<string, ModuleItem>();
 
@@ -483,6 +503,43 @@ export default defineComponent({
                 window.setTimeout(() => {
                     this.updateCanvasAvailableHeight();
                 }, 0);
+            });
+        },
+        scrollToSelectedInverterAfterRender() {
+            this.$nextTick(() => {
+                window.setTimeout(() => {
+                    this.scrollToSelectedInverter();
+                }, 0);
+            });
+        },
+        selectInverter(serial: string | null) {
+            this.selectedInverterSerial = serial;
+            if (serial !== null) {
+                this.scrollToSelectedInverterAfterRender();
+            }
+        },
+        scrollToSelectedInverter() {
+            if (this.selectedInverterSerial === null) {
+                return;
+            }
+
+            const module = this.visibleModules.find((visibleModule) => visibleModule.serial === this.selectedInverterSerial);
+            if (module === undefined) {
+                return;
+            }
+
+            const position = this.positions[module.key];
+            const canvas = this.$refs.canvas as HTMLElement | undefined;
+            if (position === undefined || canvas === undefined) {
+                return;
+            }
+
+            const centerX = (position.x + MODULE_WIDTH / 2) * this.zoomFactor;
+            const centerY = (position.y + MODULE_HEIGHT / 2) * this.zoomFactor;
+            canvas.scrollTo({
+                left: Math.max(0, centerX - canvas.clientWidth / 2),
+                top: Math.max(0, centerY - canvas.clientHeight / 2),
+                behavior: 'smooth',
             });
         },
         updateCanvasAvailableHeight() {

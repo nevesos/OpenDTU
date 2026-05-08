@@ -1,7 +1,7 @@
 <template>
     <div
         class="module-card"
-        :class="[statusClass, { 'module-card-edit': editMode, 'module-card-dragging': isDragging }]"
+        :class="[statusClass, { 'module-card-edit': editMode, 'module-card-dragging': isDragging, 'module-card-selected': isSelected }]"
         :style="[moduleStyle, heatmapStyle]"
         :title="debugTitle"
         @pointerdown="$emit('pointerdown', $event)"
@@ -53,6 +53,10 @@ export default defineComponent({
         isDragging: {
             type: Boolean,
             required: true,
+        },
+        isSelected: {
+            type: Boolean,
+            default: false,
         },
         heatmapStyle: {
             type: Object as PropType<CSSProperties>,
@@ -148,6 +152,15 @@ export default defineComponent({
 
 .module-card-dragging {
     z-index: 2;
+}
+
+.module-card-selected {
+    z-index: 3;
+    border-color: var(--bs-primary);
+    box-shadow:
+        0 0 0 0.25rem rgb(var(--bs-primary-rgb), 0.45),
+        0 0.6rem 1.4rem rgb(var(--bs-primary-rgb), 0.3);
+    transform: translateY(-2px);
 }
 
 .module-card-producing {
