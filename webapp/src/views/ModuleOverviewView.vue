@@ -34,6 +34,12 @@
                             </div>
                         </div>
                     </div>
+                    <div class="card module-overview-frequency-card">
+                        <div class="card-header text-bg-secondary">{{ $t('moduleoverview.Frequency') }}</div>
+                        <div class="card-body card-text module-overview-frequency-value">
+                            <strong>{{ latestInverterFrequencyDisplay }}</strong>
+                        </div>
+                    </div>
                 </div>
             </div>
             <div class="d-flex flex-wrap gap-2 align-items-center">
@@ -226,7 +232,7 @@ import InverterSideNav from '@/components/InverterSideNav.vue';
 import InverterTotalInfo from '@/components/InverterTotalInfo.vue';
 import ModuleCard from '@/components/ModuleCard.vue';
 import type { AlertResponse } from '@/types/AlertResponse';
-import type { Inverter, InverterStatistics, LiveData } from '@/types/LiveDataStatus';
+import type { Inverter, InverterStatistics, LiveData, ValueObject } from '@/types/LiveDataStatus';
 import type {
     BackgroundControlPoint,
     BackgroundPath,
@@ -430,6 +436,40 @@ export default defineComponent({
         },
         offlineCount(): number {
             return this.visibleModules.filter((module) => module.pollEnabled && !module.reachable).length;
+        },
+        latestInverterFrequency(): ValueObject | undefined {
+            let latestFrequency: { dataAgeMs: number; value: ValueObject } | null = null;
+
+            for (const inverter of this.inverterData) {
+                const frequency = (Object.values(inverter.AC || {}) as InverterStatistics[]).find((channel) => channel.Frequency)?.Frequency;
+                if (frequency === undefined) {
+                    continue;
+                }
+
+                const dataAgeMs = Number.isFinite(inverter.data_age_ms) ? inverter.data_age_ms : Number.POSITIVE_INFINITY;
+                if (latestFrequency === null || dataAgeMs < latestFrequency.dataAgeMs) {
+                    latestFrequency = {
+                        dataAgeMs,
+                        value: frequency,
+                    };
+                }
+            }
+
+            return latestFrequency?.value;
+        },
+        latestInverterFrequencyDisplay(): string {
+            if (this.latestInverterFrequency === undefined) {
+                return '-';
+            }
+
+            return `${this.$n(
+                this.latestInverterFrequency.v,
+                'decimal',
+                {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                }
+            )} ${this.latestInverterFrequency.u}`;
         },
         heatmapModules(): ModuleItem[] {
             return this.visibleModules.filter((module) => module.pollEnabled);
@@ -1414,14 +1454,38 @@ export default defineComponent({
     display: flex;
     flex: 0 0 auto;
     align-items: stretch;
+    gap: 0.5rem;
 }
 
 .module-overview-status-card {
     width: 20rem;
 }
 
+.module-overview-frequency-card {
+    width: 10rem;
+}
+
 .module-overview-status-card .card-body {
     padding: 0.45rem 0.75rem;
+}
+
+.module-overview-frequency-card .card-body {
+    padding: 0.45rem 0.75rem;
+}
+
+.module-overview-frequency-value {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.module-overview-frequency-value strong {
+    min-width: 0;
+    overflow: hidden;
+    font-size: 1.25rem;
+    line-height: 1.2;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .module-overview-status-values {

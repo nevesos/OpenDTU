@@ -55,6 +55,7 @@
     "moduleoverview": {
         "Title": "Modulübersicht",
         "Modules": "Module",
+        "Frequency": "Frequenz",
         "Producing": "Produzierend",
         "Offline": "Offline",
         "EditMode": "Bearbeiten",

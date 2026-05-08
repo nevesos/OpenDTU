@@ -55,6 +55,7 @@
     "moduleoverview": {
         "Title": "Module Overview",
         "Modules": "Modules",
+        "Frequency": "Frequency",
         "Producing": "Producing",
         "Offline": "Offline",
         "EditMode": "Edit",
