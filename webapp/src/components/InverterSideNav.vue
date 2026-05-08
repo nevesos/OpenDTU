@@ -27,6 +27,11 @@
                     </span>
                     <span v-else class="badge text-bg-light">-</span>
                 </div>
+                <span
+                    :key="`${inverter.serial}:${updateIndicators[inverter.serial]}`"
+                    class="inverter-update-marker me-2"
+                    :class="{ 'inverter-update-marker-ping': updateIndicators[inverter.serial] !== undefined }"
+                ></span>
                 <div class="ms-auto me-auto">
                     {{ inverter.name }}
                 </div>
@@ -50,6 +55,10 @@ export default defineComponent({
             type: String as PropType<string | null>,
             default: null,
         },
+        updateIndicators: {
+            type: Object as PropType<Record<string, number>>,
+            default: () => ({}),
+        },
     },
     emits: ['update:modelValue', 'select'],
     methods: {
@@ -61,3 +70,54 @@ export default defineComponent({
     },
 });
 </script>
+
+<style scoped>
+.inverter-update-marker {
+    position: relative;
+    display: inline-block;
+    flex: 0 0 auto;
+    width: 8px;
+    height: 8px;
+}
+
+.inverter-update-marker:before {
+    content: '';
+    position: absolute;
+    width: 8px;
+    height: 8px;
+    background: #00bb00;
+    border-color: #00bb00;
+    border-radius: 50%;
+}
+
+.inverter-update-marker-ping:after {
+    content: '';
+    position: absolute;
+    width: 32px;
+    height: 32px;
+    margin: -12px 0 0 -12px;
+    border: 1px solid #00bb00;
+    border-radius: 50%;
+    box-shadow:
+        0 0 4px #00bb00,
+        inset 0 0 4px rgb(56, 111, 169);
+    transform: scale(0);
+    animation: online 2.5s ease-in-out;
+}
+
+@keyframes online {
+    0% {
+        transform: scale(0.1);
+        opacity: 1;
+    }
+
+    70% {
+        transform: scale(2.5);
+        opacity: 0;
+    }
+
+    100% {
+        opacity: 0;
+    }
+}
+</style>

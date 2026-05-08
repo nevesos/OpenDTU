@@ -112,7 +112,12 @@
 
         <div v-if="visibleModules.length > 0" class="row gy-3">
             <div class="col-sm-3 col-md-2" :style="[inverterData.length <= 1 ? { display: 'none' } : {}]">
-                <InverterSideNav v-model="selectedInverterSerial" :inverters="inverterData" @select="selectInverter" />
+                <InverterSideNav
+                    v-model="selectedInverterSerial"
+                    :inverters="inverterData"
+                    :updateIndicators="inverterUpdateIndicators"
+                    @select="selectInverter"
+                />
             </div>
 
             <div
@@ -263,6 +268,8 @@ export default defineComponent({
             isWebsocketConnected: false,
             editMode: false,
             selectedInverterSerial: null as string | null,
+            inverterUpdateIndicators: {} as Record<string, number>,
+            inverterUpdateTimeouts: {} as Record<string, number>,
             showDisabledModules: false,
             heatmapMode: 'none' as HeatmapMode,
             zoomFactor: 1,
@@ -310,6 +317,7 @@ export default defineComponent({
     unmounted() {
         this.clearDragListeners();
         this.clearBackgroundPointDragListeners();
+        Object.values(this.inverterUpdateTimeouts).forEach((timeout) => window.clearTimeout(timeout));
         window.removeEventListener('resize', this.updateCanvasAvailableHeight);
         window.removeEventListener('keydown', this.onBackgroundKeyDown);
         this.$emitter.off('logged-in', this.updateLoginState);
@@ -518,6 +526,23 @@ export default defineComponent({
                 this.scrollToSelectedInverterAfterRender();
             }
         },
+        signalInverterUpdate(serial: string) {
+            if (this.inverterUpdateTimeouts[serial] !== undefined) {
+                window.clearTimeout(this.inverterUpdateTimeouts[serial]);
+            }
+
+            this.inverterUpdateIndicators = {
+                ...this.inverterUpdateIndicators,
+                [serial]: (this.inverterUpdateIndicators[serial] || 0) + 1,
+            };
+
+            this.inverterUpdateTimeouts[serial] = window.setTimeout(() => {
+                const { [serial]: _finishedIndicator, ...nextIndicators } = this.inverterUpdateIndicators;
+                const { [serial]: _finishedTimeout, ...nextTimeouts } = this.inverterUpdateTimeouts;
+                this.inverterUpdateIndicators = nextIndicators;
+                this.inverterUpdateTimeouts = nextTimeouts;
+            }, 2500);
+        },
         scrollToSelectedInverter() {
             if (this.selectedInverterSerial === null) {
                 return;
@@ -611,11 +636,14 @@ export default defineComponent({
             Object.assign(this.liveData.total || {}, newData.total);
             Object.assign(this.liveData.hints || {}, newData.hints);
 
-            const idx = this.liveData.inverters.findIndex((i) => i.serial === newData.inverters[0].serial);
+            const updatedInverter = newData.inverters[0];
+            this.signalInverterUpdate(updatedInverter.serial);
+
+            const idx = this.liveData.inverters.findIndex((i) => i.serial === updatedInverter.serial);
             if (idx === -1) {
-                this.liveData.inverters.push(newData.inverters[0]);
+                this.liveData.inverters.push(updatedInverter);
             } else if (this.liveData.inverters[idx] !== undefined) {
-                Object.assign(this.liveData.inverters[idx], newData.inverters[0]);
+                Object.assign(this.liveData.inverters[idx], updatedInverter);
             }
 
             this.ensureModulePositions();
