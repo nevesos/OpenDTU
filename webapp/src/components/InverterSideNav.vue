@@ -165,6 +165,22 @@ export default defineComponent({
     color: rgb(var(--bs-light-rgb), 0.85);
 }
 
+@media (min-width: 768px) and (max-width: 1199.98px) {
+    .inverter-side-nav-values {
+        font-size: 0.72rem;
+    }
+
+    .inverter-side-nav-power {
+        font-size: 0.85rem;
+    }
+}
+
+@media (min-width: 768px) and (max-width: 899.98px) {
+    .inverter-side-nav-values {
+        display: none;
+    }
+}
+
 .inverter-update-marker {
     position: absolute;
     top: 50%;

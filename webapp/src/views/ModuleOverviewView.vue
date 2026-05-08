@@ -1470,6 +1470,12 @@ export default defineComponent({
     width: 10rem;
 }
 
+.module-overview-status-card .card-header,
+.module-overview-frequency-card .card-header {
+    padding: 0.3rem 0.75rem;
+    line-height: 1.15;
+}
+
 .module-overview-status-card .card-body {
     padding: 0.45rem 0.75rem;
 }
@@ -1537,6 +1543,11 @@ export default defineComponent({
 
 .module-overview-row-totals :deep(.card-body) {
     padding: 0.45rem 0.75rem;
+}
+
+.module-overview-row-totals :deep(.card-header) {
+    padding: 0.3rem 0.75rem;
+    line-height: 1.15;
 }
 
 .module-overview-row-totals :deep(h2) {
@@ -1643,7 +1654,92 @@ export default defineComponent({
     }
 }
 
-@media (min-width: 768px) {
+@media (min-width: 768px) and (max-width: 1199.98px) {
+    .module-overview-inverter-nav-column {
+        width: calc(30% + var(--module-overview-nav-extra-width));
+    }
+
+    .module-overview-content-column.col-md-10 {
+        width: calc(70% - var(--module-overview-nav-extra-width));
+    }
+
+    .module-overview-row-totals {
+        flex-basis: 28rem;
+        min-width: 24rem;
+    }
+
+    .module-overview-row-totals :deep(.card-body),
+    .module-overview-status-card .card-body,
+    .module-overview-frequency-card .card-body {
+        padding: 0.28rem 0.45rem;
+    }
+
+    .module-overview-row-totals :deep(.card-header),
+    .module-overview-status-card .card-header,
+    .module-overview-frequency-card .card-header {
+        padding: 0.22rem 0.45rem;
+        font-size: 0.82rem;
+        line-height: 1.1;
+    }
+
+    .module-overview-row-totals :deep(h2),
+    .module-overview-status-value strong,
+    .module-overview-frequency-value strong {
+        font-size: 0.98rem;
+    }
+
+    .module-overview-status-card {
+        width: 15rem;
+    }
+
+    .module-overview-frequency-card {
+        width: 7.8rem;
+    }
+
+    .module-overview-status-values {
+        gap: 0.35rem;
+    }
+
+    .module-overview-status-value {
+        gap: 0.25rem;
+    }
+
+    .module-overview-status-value span {
+        font-size: 0.66rem;
+    }
+
+    .module-overview-select {
+        max-width: 9.5rem;
+        padding-top: 0.2rem;
+        padding-bottom: 0.2rem;
+        font-size: 0.82rem;
+    }
+
+    .module-overview-draw-tools {
+        min-width: 120px;
+    }
+
+    .module-overview-stroke-width {
+        width: 70px;
+    }
+
+    :deep(.btn) {
+        --bs-btn-padding-y: 0.2rem;
+        --bs-btn-padding-x: 0.45rem;
+        --bs-btn-font-size: 0.82rem;
+    }
+
+    :deep(.form-check-label) {
+        font-size: 0.82rem;
+    }
+
+    :deep(.form-check-input) {
+        width: 2.1em;
+        height: 1.05em;
+    }
+}
+
+@media (min-width: 1200px) {
     .module-overview-inverter-nav-column {
         flex: 0 0 auto;
         width: calc(16.66666667% + var(--module-overview-nav-extra-width));
