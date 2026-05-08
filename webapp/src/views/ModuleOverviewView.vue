@@ -283,12 +283,8 @@ export default defineComponent({
         this.loadLayout();
         this.getInitialData();
         this.initSocket();
-        this.$emitter.on('logged-in', () => {
-            this.isLogged = isLoggedIn();
-        });
-        this.$emitter.on('logged-out', () => {
-            this.isLogged = isLoggedIn();
-        });
+        this.$emitter.on('logged-in', this.updateLoginState);
+        this.$emitter.on('logged-out', this.updateLoginState);
     },
     mounted() {
         window.addEventListener('keydown', this.onBackgroundKeyDown);
@@ -300,6 +296,8 @@ export default defineComponent({
         this.clearBackgroundPointDragListeners();
         window.removeEventListener('resize', this.updateCanvasAvailableHeight);
         window.removeEventListener('keydown', this.onBackgroundKeyDown);
+        this.$emitter.off('logged-in', this.updateLoginState);
+        this.$emitter.off('logged-out', this.updateLoginState);
         this.socket?.close();
     },
     watch: {
@@ -453,6 +451,9 @@ export default defineComponent({
         },
     },
     methods: {
+        updateLoginState() {
+            this.isLogged = isLoggedIn();
+        },
         updateCanvasAvailableHeightAfterRender() {
             this.$nextTick(() => {
                 window.setTimeout(() => {
