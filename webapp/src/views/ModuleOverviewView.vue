@@ -168,7 +168,8 @@
                                     :d="pathData(path)"
                                     :stroke="path.color"
                                     :stroke-width="path.width"
-                                    fill="none"
+                                    :fill="path.closed ? path.color : 'none'"
+                                    :fill-opacity="path.closed ? 0.16 : 0"
                                     stroke-linecap="round"
                                     stroke-linejoin="round"
                                     @pointerdown.stop="onBackgroundPathPointerDown($event, path.id)"
@@ -248,6 +249,7 @@ const MODULE_WIDTH = 150;
 const MODULE_HEIGHT = 250;
 const MODULE_GAP = 18;
 const PLACEMENT_GRID_SIZE = 16;
+const BACKGROUND_POINT_GRID_SIZE = 8;
 const CANVAS_MIN_WIDTH = 960;
 const CANVAS_MIN_HEIGHT = 320;
 const CANVAS_MIN_VIEWPORT_HEIGHT = 320;
@@ -826,6 +828,9 @@ export default defineComponent({
         snapToGrid(value: number): number {
             return Math.round(value / PLACEMENT_GRID_SIZE) * PLACEMENT_GRID_SIZE;
         },
+        snapToBackgroundPointGrid(value: number): number {
+            return Math.round(value / BACKGROUND_POINT_GRID_SIZE) * BACKGROUND_POINT_GRID_SIZE;
+        },
         parseModuleKey(key: string): { serial: string; channel: number } | null {
             const match = key.match(/^(.+):DC:(\d+)$/);
             if (match === null || match[1] === undefined || match[2] === undefined) {
@@ -964,11 +969,23 @@ export default defineComponent({
                     return path;
                 }
 
+                const closingPointIndex = this.findBackgroundOverlappingPointIndex(path, point);
+                if (closingPointIndex !== null) {
+                    return {
+                        ...path,
+                        closed: true,
+                    };
+                }
+
                 return {
                     ...path,
                     points: [...path.points, point],
                 };
             });
+            if (this.backgroundPaths.some((path) => path.id === activePath.id && path.closed)) {
+                this.activeBackgroundPathId = null;
+                this.backgroundHoverPoint = null;
+            }
         },
         onBackgroundPointerMove(event: PointerEvent) {
             if (!this.editMode || !this.backgroundDrawMode) {
@@ -1060,6 +1077,8 @@ export default defineComponent({
                 const closingPointIndex = this.findBackgroundClosingPointIndex(dragState.pathId, dragState.pointIndex, point);
                 if (closingPointIndex !== null) {
                     this.closeBackgroundPathAtPoint(dragState.pathId, closingPointIndex, true);
+                } else {
+                    this.mergeBackgroundOverlappingPoint(dragState.pathId, dragState.pointIndex);
                 }
             }
 
@@ -1094,8 +1113,7 @@ export default defineComponent({
                 return;
             }
 
-            const closingPoint = path.points[pointIndex];
-            if (closingPoint === undefined) {
+            if (path.points[pointIndex] === undefined) {
                 return;
             }
 
@@ -1106,9 +1124,7 @@ export default defineComponent({
 
                 return {
                     ...backgroundPath,
-                    points: replaceLastPoint
-                        ? [...backgroundPath.points.slice(0, -1), { ...closingPoint }]
-                        : [...backgroundPath.points, { ...closingPoint }],
+                    points: replaceLastPoint ? backgroundPath.points.slice(0, -1) : backgroundPath.points,
                     closed: true,
                 };
             });
@@ -1131,6 +1147,10 @@ export default defineComponent({
                     return backgroundPath;
                 }
 
+                if (backgroundPath.points.some((existingPoint) => this.isSamePoint(existingPoint, point))) {
+                    return backgroundPath;
+                }
+
                 return {
                     ...backgroundPath,
                     points: [
@@ -1141,6 +1161,33 @@ export default defineComponent({
                 };
             });
             this.activeBackgroundPathId = path.closed ? null : path.id;
+        },
+        mergeBackgroundOverlappingPoint(pathId: number, pointIndex: number): boolean {
+            const path = this.backgroundPaths.find((backgroundPath) => backgroundPath.id === pathId);
+            const point = path?.points[pointIndex];
+            if (path === undefined || point === undefined) {
+                return false;
+            }
+
+            const overlappingPointIndex = path.points.findIndex((existingPoint, existingPointIndex) => {
+                return existingPointIndex !== pointIndex && this.isSamePoint(existingPoint, point);
+            });
+            if (overlappingPointIndex === -1) {
+                return false;
+            }
+
+            this.backgroundPaths = this.backgroundPaths.map((backgroundPath) => {
+                if (backgroundPath.id !== pathId) {
+                    return backgroundPath;
+                }
+
+                return {
+                    ...backgroundPath,
+                    points: backgroundPath.points.filter((_, existingPointIndex) => existingPointIndex !== pointIndex),
+                };
+            });
+
+            return true;
         },
         deleteBackgroundPath(pathId: number) {
             this.backgroundPaths = this.backgroundPaths.filter((path) => path.id !== pathId);
@@ -1222,6 +1269,18 @@ export default defineComponent({
 
             return closingPointIndex === -1 ? null : closingPointIndex;
         },
+        findBackgroundOverlappingPointIndex(path: BackgroundPath, point: DrawingPoint): number | null {
+            if (path.closed || path.points.length < 2) {
+                return null;
+            }
+
+            const closingPointIndex = path.points.findIndex((existingPoint, pointIndex) => {
+                const isLastPoint = pointIndex === path.points.length - 1;
+                return !isLastPoint && this.isSamePoint(existingPoint, point);
+            });
+
+            return closingPointIndex === -1 ? null : closingPointIndex;
+        },
         findNearestBackgroundSegmentStartIndex(path: BackgroundPath, point: DrawingPoint): number | null {
             let nearestSegmentStartIndex: number | null = null;
             let nearestDistance = Number.POSITIVE_INFINITY;
@@ -1261,8 +1320,8 @@ export default defineComponent({
             const position = this.canvasPointerPosition(event);
 
             return {
-                x: Math.max(0, Math.round(position.x)),
-                y: Math.max(0, Math.round(position.y)),
+                x: Math.max(0, this.snapToBackgroundPointGrid(position.x)),
+                y: Math.max(0, this.snapToBackgroundPointGrid(position.y)),
             };
         },
         canvasPointerPosition(event: PointerEvent): DrawingPoint {
@@ -1286,7 +1345,7 @@ export default defineComponent({
             }
 
             const commands = [`M ${firstPoint.x} ${firstPoint.y}`, ...points.slice(1).map((point) => `L ${point.x} ${point.y}`)];
-            return path.closed && this.isSamePoint(firstPoint, points[points.length - 1]) ? `${commands.join(' ')} Z` : commands.join(' ');
+            return path.closed ? `${commands.join(' ')} Z` : commands.join(' ');
         },
         isSamePoint(firstPoint: DrawingPoint, secondPoint?: DrawingPoint): boolean {
             return secondPoint !== undefined && firstPoint.x === secondPoint.x && firstPoint.y === secondPoint.y;
