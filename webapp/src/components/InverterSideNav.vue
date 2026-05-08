@@ -19,7 +19,7 @@
                 <div class="me-2">
                     <span
                         v-if="inverter.AC"
-                        class="badge"
+                        class="badge inverter-side-nav-power"
                         :class="{
                             'text-bg-secondary': !inverter.poll_enabled,
                             'text-bg-danger': inverter.poll_enabled && !inverter.reachable,
@@ -32,8 +32,11 @@
                     </span>
                     <span v-else class="badge text-bg-light">-</span>
                 </div>
-                <div class="ms-auto me-auto">
-                    {{ inverter.name }}
+                <div class="ms-auto me-auto inverter-side-nav-text">
+                    <div class="inverter-side-nav-name">{{ inverter.name }}</div>
+                    <div v-if="inverterInfoLine(inverter) !== ''" class="inverter-side-nav-values">
+                        {{ inverterInfoLine(inverter) }}
+                    </div>
                 </div>
             </div>
         </button>
@@ -41,7 +44,7 @@
 </template>
 
 <script lang="ts">
-import type { Inverter } from '@/types/LiveDataStatus';
+import type { Inverter, InverterStatistics, ValueObject } from '@/types/LiveDataStatus';
 import type { PropType } from 'vue';
 import { defineComponent } from 'vue';
 
@@ -67,6 +70,19 @@ export default defineComponent({
             this.$emit('update:modelValue', nextSerial);
             this.$emit('select', nextSerial);
         },
+        inverterInfoLine(inverter: Inverter): string {
+            const inverterChannelData = Object.values(inverter.INV || {})[0] as InverterStatistics | undefined;
+            return [this.formatValue(inverterChannelData?.YieldDay), this.formatValue(inverterChannelData?.Temperature)]
+                .filter((value) => value !== '-')
+                .join(' / ');
+        },
+        formatValue(value?: ValueObject): string {
+            if (value === undefined) {
+                return '-';
+            }
+
+            return `${this.$n(value.v, value.d === 0 ? 'decimalNoDigits' : 'decimal')} ${value.u}`;
+        },
     },
 });
 </script>
@@ -74,6 +90,32 @@ export default defineComponent({
 <style scoped>
 .nav-link {
     position: relative;
+}
+
+.inverter-side-nav-text {
+    min-width: 0;
+}
+
+.inverter-side-nav-name,
+.inverter-side-nav-values {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.inverter-side-nav-values {
+    color: var(--bs-secondary-color);
+    font-size: 0.8rem;
+    line-height: 1.2;
+}
+
+.inverter-side-nav-power {
+    font-size: 0.95rem;
+    line-height: 1.2;
+}
+
+.nav-link.active .inverter-side-nav-values {
+    color: rgb(var(--bs-light-rgb), 0.85);
 }
 
 .inverter-update-marker {
