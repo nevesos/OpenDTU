@@ -153,6 +153,8 @@
                     class="module-overview-canvas"
                     :class="{ 'module-overview-canvas-edit': editMode }"
                     :style="canvasStyle"
+                    @touchstart.stop
+                    @touchmove.stop
                 >
                     <div class="module-overview-zoom-spacer" :style="{ width: `${scaledCanvasWidth}px`, height: `${scaledCanvasHeight}px` }">
                         <div class="module-overview-workspace" :style="workspaceStyle">
@@ -1572,10 +1574,13 @@ export default defineComponent({
     border: 1px solid var(--bs-border-color);
     border-radius: var(--bs-border-radius);
     background-color: var(--bs-body-bg);
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-x pan-y;
 }
 
 .module-overview-canvas-edit {
     cursor: crosshair;
+    touch-action: none;
 }
 
 .module-overview-zoom-spacer {

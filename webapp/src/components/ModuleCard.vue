@@ -138,12 +138,13 @@ export default defineComponent({
     border-radius: var(--bs-border-radius);
     background-color: var(--bs-body-bg);
     box-shadow: var(--bs-box-shadow-sm);
-    touch-action: none;
+    touch-action: pan-x pan-y;
     user-select: none;
 }
 
 .module-card-edit {
     cursor: grab;
+    touch-action: none;
 }
 
 .module-card-edit:active {
