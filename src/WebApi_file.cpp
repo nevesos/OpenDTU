@@ -21,16 +21,6 @@ bool isReadonlyAllowedFile(const String& filename)
 }
 }
 
-namespace {
-bool isReadonlyAllowedFile(const String& filename)
-{
-    // Keep this allowlist intentionally narrow. The generic file API can expose
-    // sensitive configuration files, so only harmless UI state may use the
-    // existing readonly access mode.
-    return filename == "/module_overview.json";
-}
-}
-
 void WebApiFileClass::init(AsyncWebServer& server, Scheduler& scheduler)
 {
     using std::placeholders::_1;
@@ -98,14 +88,6 @@ void WebApiFileClass::onFileGet(AsyncWebServerRequest* request)
         }
 
         requestFile = name;
-    } else if (!WebApi.checkCredentials(request)) {
-        return;
-    }
-
-    if (allowReadonlyAccess) {
-        if (!WebApi.checkCredentialsReadonly(request)) {
-            return;
-        }
     } else if (!WebApi.checkCredentials(request)) {
         return;
     }
