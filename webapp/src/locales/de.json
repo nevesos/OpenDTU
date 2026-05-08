@@ -77,7 +77,7 @@
         "HeatmapYieldDayDiff": "Heatmap: Tagesertragsdifferenz",
         "Zoom": "Zoom",
         "NoModules": "Keine Modulwerte gefunden.",
-        "Channel": "Kanal {channel}"
+        "Channel": "String {channel}"
     },
     "apiresponse": {
         "1001": "Einstellungen gespeichert!",

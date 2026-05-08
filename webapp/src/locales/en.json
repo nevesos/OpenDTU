@@ -77,7 +77,7 @@
         "HeatmapYieldDayDiff": "Heatmap: Daily yield difference",
         "Zoom": "Zoom",
         "NoModules": "No module values found.",
-        "Channel": "Channel {channel}"
+        "Channel": "String {channel}"
     },
     "apiresponse": {
         "1001": "Settings saved!",

@@ -77,7 +77,7 @@
         "HeatmapYieldDayDiff": "Heatmap : difference de rendement du jour",
         "Zoom": "Zoom",
         "NoModules": "Aucune valeur de module trouvée.",
-        "Channel": "Canal {channel}"
+        "Channel": "String {channel}"
     },
     "apiresponse": {
         "1001": "Paramètres enregistrés !",

@@ -92,7 +92,7 @@ export default defineComponent({
                 `key: ${this.module.key}`,
                 `serial: ${this.module.serial}`,
                 `inverter: ${this.module.inverterName}`,
-                `channel: ${this.module.channel}`,
+                `string: ${this.module.channel + 1}`,
                 `x: ${Math.round(this.position.x)}`,
                 `y: ${Math.round(this.position.y)}`,
                 `poll_enabled: ${this.module.pollEnabled}`,
