@@ -26,7 +26,7 @@
                 <span>{{ formatValue(module.YieldDay) }}</span>
             </div>
         </template>
-        <div class="module-key">{{ module.key }}</div>
+        <div class="module-key">{{ $t('moduleoverview.Channel', { channel: module.channel + 1 }) }}</div>
     </div>
 </template>
 
@@ -222,13 +222,14 @@ export default defineComponent({
 .module-values {
     display: grid;
     grid-template-columns: 1fr;
-    gap: 0.25rem;
+    gap: 0.3rem;
     margin-top: 0.7rem;
     padding: 0.35rem;
     border-radius: var(--bs-border-radius-sm);
     background-color: rgb(var(--bs-body-bg-rgb), 0.82);
     color: var(--bs-body-color);
-    font-size: 0.78rem;
+    font-size: 1rem;
+    line-height: 1.2;
 }
 
 .module-values span {
