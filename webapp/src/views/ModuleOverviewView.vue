@@ -63,7 +63,7 @@
                         {{ $t('moduleoverview.ShowDisabled') }}
                     </label>
                 </div>
-                <div class="btn-group" role="group">
+                <div class="btn-group" :class="{ invisible: !editMode }" role="group">
                     <button
                         type="button"
                         class="btn btn-outline-primary"
@@ -92,14 +92,26 @@
                     />
                 </div>
                 <div class="btn-group" role="group">
-                    <button type="button" class="btn btn-outline-primary" :class="{ active: editMode }" :disabled="!isLogged" @click="toggleEditMode">
-                        <BIconPencilSquare />&nbsp;{{ $t('moduleoverview.EditMode') }}
-                    </button>
-                    <button type="button" class="btn btn-outline-secondary" :disabled="!editMode" @click="arrangeModules">
+                    <button
+                        type="button"
+                        class="btn btn-outline-secondary"
+                        :class="{ invisible: !editMode }"
+                        :disabled="!editMode"
+                        @click="arrangeModules"
+                    >
                         <BIconGrid3x3Gap />&nbsp;{{ $t('moduleoverview.Arrange') }}
                     </button>
-                    <button type="button" class="btn btn-primary" :disabled="!isLogged || !editMode || layoutSaving" @click="saveLayout">
+                    <button
+                        type="button"
+                        class="btn btn-primary"
+                        :class="{ invisible: !editMode }"
+                        :disabled="!isLogged || !editMode || layoutSaving"
+                        @click="saveLayout"
+                    >
                         <BIconSave />&nbsp;{{ $t('moduleoverview.SaveLayout') }}
+                    </button>
+                    <button type="button" class="btn btn-outline-primary" :class="{ active: editMode }" :disabled="!isLogged" @click="toggleEditMode">
+                        <BIconPencilSquare />&nbsp;{{ $t('moduleoverview.EditMode') }}
                     </button>
                 </div>
             </div>

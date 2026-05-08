@@ -10,6 +10,11 @@
             :aria-selected="inverter.serial === modelValue"
             @click="selectInverter(inverter.serial)"
         >
+            <span
+                :key="`${inverter.serial}:${updateIndicators[inverter.serial]}`"
+                class="inverter-update-marker"
+                :class="{ 'inverter-update-marker-ping': updateIndicators[inverter.serial] !== undefined }"
+            ></span>
             <div class="d-flex align-items-center">
                 <div class="me-2">
                     <span
@@ -27,11 +32,6 @@
                     </span>
                     <span v-else class="badge text-bg-light">-</span>
                 </div>
-                <span
-                    :key="`${inverter.serial}:${updateIndicators[inverter.serial]}`"
-                    class="inverter-update-marker me-2"
-                    :class="{ 'inverter-update-marker-ping': updateIndicators[inverter.serial] !== undefined }"
-                ></span>
                 <div class="ms-auto me-auto">
                     {{ inverter.name }}
                 </div>
@@ -72,12 +72,18 @@ export default defineComponent({
 </script>
 
 <style scoped>
-.inverter-update-marker {
+.nav-link {
     position: relative;
-    display: inline-block;
-    flex: 0 0 auto;
+}
+
+.inverter-update-marker {
+    position: absolute;
+    top: 50%;
+    right: 0.3rem;
+    display: block;
     width: 8px;
     height: 8px;
+    transform: translateY(-50%);
 }
 
 .inverter-update-marker:before {
