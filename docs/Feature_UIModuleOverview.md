@@ -114,6 +114,8 @@ Die Module werden aus `inverters[].DC` erzeugt. Wichtiges Finding:
 - `DC` liegt in Live-Daten als Objekt mit numerischen String-Keys vor, z. B. `"0"`, `"1"`, `"2"`, `"3"`, nicht zwingend als echtes Array.
 - Die View nutzt deshalb `Object.entries(inverter.DC || {})`.
 - WebSocket-Updates werden in `handleMessage(...)` in `liveData.total`, `liveData.hints` und den passenden Wechselrichter in `liveData.inverters` gemerged.
+- Gespeicherte Modulpositionen koennen Platzhalter-Kacheln erzeugen, wenn aktuell keine DC-Livedaten fuer den Kanal vorliegen.
+- Diese Platzhalter werden nur erzeugt, wenn die Seriennummer noch in `liveData.inverters` existiert. Wurde ein Wechselrichter geloescht, bleiben seine gespeicherten Positionen nicht mehr als sichtbare Platzhalter erhalten und werden beim naechsten Speichern aus dem Layout entfernt.
 
 Gemeinsame Typen liegen in `webapp/src/types/ModuleOverview.ts`:
 
@@ -194,10 +196,11 @@ Aktuelle Layout-JSON:
       "id": 1,
       "color": "#5b8def",
       "width": 4,
-      "closed": false,
+      "closed": true,
       "points": [
         { "x": 32, "y": 32 },
-        { "x": 180, "y": 96 }
+        { "x": 180, "y": 96 },
+        { "x": 96, "y": 180 }
       ]
     }
   ]
@@ -215,6 +218,7 @@ Aktueller Funktionsumfang:
 - Button `Zeichnen` aktiviert/deaktiviert den Zeichenmodus.
 - Punktbasiertes Zeichnen statt Freihand.
 - Klick auf freie Flaeche setzt einen Punkt.
+- Punkte snappen auf ein feines 8px-Raster.
 - Punkte werden per gerader Linie verbunden.
 - Beim Bewegen der Maus erscheint eine Vorschau-Linie vom letzten Punkt zur Mausposition.
 - Gesetzte Punkte werden im Zeichenmodus als Griffpunkte angezeigt.
@@ -222,6 +226,10 @@ Aktueller Funktionsumfang:
 - Klick auf eine bestehende Verbindungslinie fuegt dort einen neuen Punkt ein.
 - Klick auf einen vorhandenen Punkt der aktiven offenen Form schliesst die Form.
 - Wird der letzte Punkt per Drag auf einen vorhandenen Punkt gelegt, wird die Form ebenfalls geschlossen.
+- Beim Schliessen wird kein doppelter Start-/Endpunkt gespeichert; `closed: true` und SVG `Z` bilden die Schliessung ab.
+- Werden zwei Punkte exakt auf dieselbe Rasterposition gelegt, werden sie zu einem Punkt zusammengefuehrt.
+- Wird ein Punkt auf einer Linie exakt an einer bereits vorhandenen Punktposition eingefuegt, wird kein Duplikat angelegt.
+- Geschlossene Formen werden automatisch mit der Linienfarbe und transparenter Deckkraft gefuellt.
 - Nach dem Schliessen ist keine aktive Form mehr gesetzt; der naechste Klick beginnt eine neue Form.
 - `Escape` verlaesst die aktive Zeichnung, vorhandene Formen bleiben erhalten.
 - Rechtsklick auf eine Form oder einen ihrer Punkte loescht die ganze Form nach `window.confirm(...)`.
@@ -253,6 +261,7 @@ const MODULE_WIDTH = 150;
 const MODULE_HEIGHT = 250;
 const MODULE_GAP = 18;
 const PLACEMENT_GRID_SIZE = 16;
+const BACKGROUND_POINT_GRID_SIZE = 8;
 const CANVAS_MIN_WIDTH = 960;
 const CANVAS_MIN_HEIGHT = 320;
 const CANVAS_MIN_VIEWPORT_HEIGHT = 320;
@@ -378,6 +387,7 @@ Relevante neue Keys:
 ## Bekannte Themen
 
 - `GET /api/livedata/status` kann initial keine `DC`-Daten enthalten. Module erscheinen dann erst nach WebSocket-Daten.
+- Platzhalter fuer gespeicherte Positionen bleiben nur sichtbar, solange die zugehoerige Wechselrichter-Seriennummer noch in den Live-Daten existiert.
 - Falls scheinbare Duplikate sichtbar werden, zuerst die eingeblendeten Modul-Keys vergleichen:
   - Gleicher Key: Rendering-/State-Problem.
   - Unterschiedlicher Key: echte unterschiedliche Kanaele, nur optisch/positionell aehnlich.
