@@ -353,6 +353,7 @@ export default defineComponent({
         },
         modules(): ModuleItem[] {
             const modulesByKey = new Map<string, ModuleItem>();
+            const inverterSerials = new Set((this.liveData.inverters || []).map((inverter: Inverter) => inverter.serial));
 
             (this.liveData.inverters || [])
                 .slice()
@@ -396,6 +397,9 @@ export default defineComponent({
 
                 const parsedKey = this.parseModuleKey(key);
                 if (parsedKey === null) {
+                    return;
+                }
+                if (!inverterSerials.has(parsedKey.serial)) {
                     return;
                 }
 
