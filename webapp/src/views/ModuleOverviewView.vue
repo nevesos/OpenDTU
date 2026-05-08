@@ -46,7 +46,7 @@
                     </div>
                 </div>
             </div>
-            <div class="d-flex flex-wrap gap-2 align-items-center">
+            <div class="d-flex flex-wrap gap-2 align-items-center module-overview-toolbar">
                 <select v-model="heatmapMode" class="form-select form-select-sm module-overview-select">
                     <option value="none">{{ $t('moduleoverview.HeatmapNone') }}</option>
                     <option value="power">{{ $t('moduleoverview.HeatmapPower') }}</option>
@@ -73,56 +73,58 @@
                         {{ $t('moduleoverview.ShowDisabled') }}
                     </label>
                 </div>
-                <div class="btn-group" :class="{ invisible: !editMode }" role="group">
-                    <button
-                        type="button"
-                        class="btn btn-outline-primary"
-                        :class="{ active: backgroundDrawMode }"
-                        :disabled="!editMode"
-                        @click="toggleBackgroundDrawMode"
-                    >
-                        <BIconBrush />&nbsp;{{ $t('moduleoverview.DrawBackground') }}
-                    </button>
-                    <button type="button" class="btn btn-outline-secondary" :disabled="!editMode || backgroundPaths.length === 0" @click="undoBackgroundPath">
-                        <BIconArrowCounterclockwise />&nbsp;{{ $t('moduleoverview.Undo') }}
-                    </button>
-                    <button type="button" class="btn btn-outline-danger" :disabled="!editMode || backgroundPaths.length === 0" @click="clearBackground">
-                        <BIconTrash />&nbsp;{{ $t('moduleoverview.ClearBackground') }}
-                    </button>
-                </div>
-                <div class="d-flex align-items-center gap-2 module-overview-draw-tools" :class="{ invisible: !editMode }">
-                    <input v-model="backgroundStrokeColor" class="form-control form-control-color" type="color" :title="$t('moduleoverview.DrawColor')" />
-                    <input
-                        v-model.number="backgroundStrokeWidth"
-                        class="form-range module-overview-stroke-width"
-                        type="range"
-                        min="1"
-                        max="20"
-                        :title="$t('moduleoverview.DrawWidth')"
-                    />
-                </div>
-                <div class="btn-group" role="group">
-                    <button
-                        type="button"
-                        class="btn btn-outline-secondary"
-                        :class="{ invisible: !editMode }"
-                        :disabled="!editMode"
-                        @click="arrangeModules"
-                    >
-                        <BIconGrid3x3Gap />&nbsp;{{ $t('moduleoverview.Arrange') }}
-                    </button>
-                    <button
-                        type="button"
-                        class="btn btn-primary"
-                        :class="{ invisible: !editMode }"
-                        :disabled="!isLogged || !editMode || layoutSaving"
-                        @click="saveLayout"
-                    >
-                        <BIconSave />&nbsp;{{ $t('moduleoverview.SaveLayout') }}
-                    </button>
-                    <button type="button" class="btn btn-outline-primary" :class="{ active: editMode }" :disabled="!isLogged" @click="toggleEditMode">
-                        <BIconPencilSquare />&nbsp;{{ $t('moduleoverview.EditMode') }}
-                    </button>
+                <div class="d-flex flex-wrap gap-2 align-items-center module-overview-edit-toolbar">
+                    <div class="btn-group" :class="{ invisible: !editMode }" role="group">
+                        <button
+                            type="button"
+                            class="btn btn-outline-primary"
+                            :class="{ active: backgroundDrawMode }"
+                            :disabled="!editMode"
+                            @click="toggleBackgroundDrawMode"
+                        >
+                            <BIconBrush />&nbsp;{{ $t('moduleoverview.DrawBackground') }}
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary" :disabled="!editMode || backgroundPaths.length === 0" @click="undoBackgroundPath">
+                            <BIconArrowCounterclockwise />&nbsp;{{ $t('moduleoverview.Undo') }}
+                        </button>
+                        <button type="button" class="btn btn-outline-danger" :disabled="!editMode || backgroundPaths.length === 0" @click="clearBackground">
+                            <BIconTrash />&nbsp;{{ $t('moduleoverview.ClearBackground') }}
+                        </button>
+                    </div>
+                    <div class="d-flex align-items-center gap-2 module-overview-draw-tools" :class="{ invisible: !editMode }">
+                        <input v-model="backgroundStrokeColor" class="form-control form-control-color" type="color" :title="$t('moduleoverview.DrawColor')" />
+                        <input
+                            v-model.number="backgroundStrokeWidth"
+                            class="form-range module-overview-stroke-width"
+                            type="range"
+                            min="1"
+                            max="20"
+                            :title="$t('moduleoverview.DrawWidth')"
+                        />
+                    </div>
+                    <div class="btn-group" role="group">
+                        <button
+                            type="button"
+                            class="btn btn-outline-secondary"
+                            :class="{ invisible: !editMode }"
+                            :disabled="!editMode"
+                            @click="arrangeModules"
+                        >
+                            <BIconGrid3x3Gap />&nbsp;{{ $t('moduleoverview.Arrange') }}
+                        </button>
+                        <button
+                            type="button"
+                            class="btn btn-primary"
+                            :class="{ invisible: !editMode }"
+                            :disabled="!isLogged || !editMode || layoutSaving"
+                            @click="saveLayout"
+                        >
+                            <BIconSave />&nbsp;{{ $t('moduleoverview.SaveLayout') }}
+                        </button>
+                        <button type="button" class="btn btn-outline-primary" :class="{ active: editMode }" :disabled="!isLogged" @click="toggleEditMode">
+                            <BIconPencilSquare />&nbsp;{{ $t('moduleoverview.EditMode') }}
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1460,6 +1462,7 @@ export default defineComponent({
 .module-overview-status-badges {
     display: flex;
     flex: 0 0 auto;
+    flex-wrap: wrap;
     align-items: stretch;
     gap: 0.5rem;
 }
@@ -1470,6 +1473,20 @@ export default defineComponent({
 
 .module-overview-frequency-card {
     width: 10rem;
+}
+
+.module-overview-status-card,
+.module-overview-frequency-card,
+.module-overview-toolbar > *,
+.module-overview-toolbar .btn-group,
+.module-overview-edit-toolbar,
+.module-overview-draw-tools {
+    flex: 0 0 auto;
+}
+
+.module-overview-toolbar .btn-group,
+.module-overview-edit-toolbar {
+    white-space: nowrap;
 }
 
 .module-overview-status-card .card-header,
@@ -1768,8 +1785,22 @@ export default defineComponent({
         flex: 1 1 100%;
     }
 
-    .module-overview-status-card {
+    .module-overview-status-card,
+    .module-overview-frequency-card {
         width: 100%;
+    }
+
+    .module-overview-toolbar > *,
+    .module-overview-toolbar .btn-group,
+    .module-overview-edit-toolbar,
+    .module-overview-draw-tools {
+        max-width: 100%;
+    }
+
+    .module-overview-toolbar .btn-group,
+    .module-overview-edit-toolbar {
+        flex-wrap: wrap;
+        white-space: normal;
     }
 }
 </style>
