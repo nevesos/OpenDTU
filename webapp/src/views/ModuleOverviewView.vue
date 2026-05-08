@@ -1544,12 +1544,18 @@ export default defineComponent({
     font-size: 1.25rem;
 }
 
-.module-overview-inverter-nav-column {
+.module-overview-inverter-nav-column,
+.module-overview-content-column {
     --module-overview-nav-extra-width: 1.8rem;
+}
+
+.module-overview-content-column {
+    padding-right: 0;
 }
 
 .module-overview-canvas {
     position: relative;
+    width: 100%;
     overflow-x: auto;
     overflow-y: auto;
     border: 1px solid var(--bs-border-color);
@@ -1627,20 +1633,24 @@ export default defineComponent({
 
 @media (min-width: 576px) {
     .module-overview-inverter-nav-column {
+        flex: 0 0 auto;
         width: calc(25% + var(--module-overview-nav-extra-width));
     }
 
     .module-overview-content-column.col-sm-9 {
+        flex: 0 0 auto;
         width: calc(75% - var(--module-overview-nav-extra-width));
     }
 }
 
 @media (min-width: 768px) {
     .module-overview-inverter-nav-column {
+        flex: 0 0 auto;
         width: calc(16.66666667% + var(--module-overview-nav-extra-width));
     }
 
     .module-overview-content-column.col-md-10 {
+        flex: 0 0 auto;
         width: calc(83.33333333% - var(--module-overview-nav-extra-width));
     }
 }
