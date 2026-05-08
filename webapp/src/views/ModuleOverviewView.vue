@@ -132,7 +132,7 @@
         </BootstrapAlert>
 
         <div v-if="visibleModules.length > 0" class="row gy-3">
-            <div class="col-sm-3 col-md-2" :style="[inverterData.length <= 1 ? { display: 'none' } : {}]">
+            <div class="col-sm-3 col-md-2 module-overview-inverter-nav-column" :style="[inverterData.length <= 1 ? { display: 'none' } : {}]">
                 <InverterSideNav
                     v-model="selectedInverterSerial"
                     :inverters="inverterData"
@@ -142,6 +142,7 @@
             </div>
 
             <div
+                class="module-overview-content-column"
                 :class="{
                     'col-sm-9 col-md-10': inverterData.length > 1,
                     'col-sm-12 col-md-12': inverterData.length <= 1,
@@ -1543,6 +1544,10 @@ export default defineComponent({
     font-size: 1.25rem;
 }
 
+.module-overview-inverter-nav-column {
+    --module-overview-nav-extra-width: 1.8rem;
+}
+
 .module-overview-canvas {
     position: relative;
     overflow-x: auto;
@@ -1618,6 +1623,26 @@ export default defineComponent({
 .module-overview-background-point-active {
     fill: var(--bs-primary);
     stroke: var(--bs-body-bg);
+}
+
+@media (min-width: 576px) {
+    .module-overview-inverter-nav-column {
+        width: calc(25% + var(--module-overview-nav-extra-width));
+    }
+
+    .module-overview-content-column.col-sm-9 {
+        width: calc(75% - var(--module-overview-nav-extra-width));
+    }
+}
+
+@media (min-width: 768px) {
+    .module-overview-inverter-nav-column {
+        width: calc(16.66666667% + var(--module-overview-nav-extra-width));
+    }
+
+    .module-overview-content-column.col-md-10 {
+        width: calc(83.33333333% - var(--module-overview-nav-extra-width));
+    }
 }
 
 @media (max-width: 767.98px) {
