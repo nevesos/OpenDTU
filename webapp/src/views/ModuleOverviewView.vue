@@ -3,7 +3,6 @@
         :title="$t('moduleoverview.Title')"
         :isLoading="dataLoading"
         :isWideScreen="true"
-        :showWebSocket="true"
         :isWebsocketConnected="isWebsocketConnected"
         :showReload="true"
         @reload="reloadData"
