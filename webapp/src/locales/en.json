@@ -1,6 +1,7 @@
 {
     "menu": {
         "LiveView": "Live View",
+        "ModuleOverview": "Module Overview",
         "Settings": "Settings",
         "NetworkSettings": "Network Settings",
         "NTPSettings": "NTP Settings",
@@ -50,6 +51,32 @@
     "dataagedisplay": {
         "DataAge": "Data Age",
         "SecondsSince": "0 seconds | 1 second | {n} seconds"
+    },
+    "moduleoverview": {
+        "Title": "Module Overview",
+        "Modules": "Modules",
+        "Producing": "Producing",
+        "Offline": "Offline",
+        "EditMode": "Edit",
+        "Arrange": "Arrange",
+        "SaveLayout": "Save",
+        "LoadLayoutFailed": "The saved module overview could not be loaded.",
+        "DrawBackground": "Draw",
+        "Undo": "Undo",
+        "ClearBackground": "Clear background",
+        "ConfirmDeleteShape": "Delete this shape?",
+        "DrawColor": "Draw color",
+        "DrawWidth": "Stroke width",
+        "ShowDisabled": "Show disabled",
+        "HeatmapNone": "No heatmap",
+        "HeatmapPower": "Heatmap: Power",
+        "HeatmapPowerMax": "Heatmap: Power / maximum",
+        "HeatmapPowerDiff": "Heatmap: Power difference",
+        "HeatmapYieldDay": "Heatmap: Daily yield",
+        "HeatmapYieldDayDiff": "Heatmap: Daily yield difference",
+        "Zoom": "Zoom",
+        "NoModules": "No module values found.",
+        "Channel": "Channel {channel}"
     },
     "apiresponse": {
         "1001": "Settings saved!",

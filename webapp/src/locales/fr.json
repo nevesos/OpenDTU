@@ -1,6 +1,7 @@
 {
     "menu": {
         "LiveView": "Direct",
+        "ModuleOverview": "Vue des modules",
         "Settings": "Paramètres",
         "NetworkSettings": "Réseau",
         "NTPSettings": "Heure locale",
@@ -50,6 +51,32 @@
     "dataagedisplay": {
         "DataAge": "Âge des données",
         "SecondsSince": "0 secondes | 1 seconde | {n} secondes"
+    },
+    "moduleoverview": {
+        "Title": "Vue des modules",
+        "Modules": "Modules",
+        "Producing": "Production",
+        "Offline": "Hors ligne",
+        "EditMode": "Modifier",
+        "Arrange": "Disposer",
+        "SaveLayout": "Sauvegarder",
+        "LoadLayoutFailed": "La vue des modules enregistree n'a pas pu etre chargee.",
+        "DrawBackground": "Dessiner",
+        "Undo": "Annuler",
+        "ClearBackground": "Effacer le fond",
+        "ConfirmDeleteShape": "Supprimer cette forme ?",
+        "DrawColor": "Couleur du trace",
+        "DrawWidth": "Largeur du trait",
+        "ShowDisabled": "Afficher les modules desactives",
+        "HeatmapNone": "Pas de heatmap",
+        "HeatmapPower": "Heatmap : puissance",
+        "HeatmapPowerMax": "Heatmap : puissance / maximum",
+        "HeatmapPowerDiff": "Heatmap : difference de puissance",
+        "HeatmapYieldDay": "Heatmap : rendement du jour",
+        "HeatmapYieldDayDiff": "Heatmap : difference de rendement du jour",
+        "Zoom": "Zoom",
+        "NoModules": "Aucune valeur de module trouvée.",
+        "Channel": "Canal {channel}"
     },
     "apiresponse": {
         "1001": "Paramètres enregistrés !",

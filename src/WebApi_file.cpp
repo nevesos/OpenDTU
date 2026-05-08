@@ -11,6 +11,16 @@
 #include <AsyncJson.h>
 #include <LittleFS.h>
 
+namespace {
+bool isReadonlyAllowedFile(const String& filename)
+{
+    // Keep this allowlist intentionally narrow. The generic file API can expose
+    // sensitive configuration files, so only harmless UI state may use the
+    // existing readonly access mode.
+    return filename == "/module_overview.json";
+}
+}
+
 void WebApiFileClass::init(AsyncWebServer& server, Scheduler& scheduler)
 {
     using std::placeholders::_1;
@@ -58,19 +68,28 @@ void WebApiFileClass::onFileListGet(AsyncWebServerRequest* request)
 
 void WebApiFileClass::onFileGet(AsyncWebServerRequest* request)
 {
-    if (!WebApi.checkCredentials(request)) {
-        return;
-    }
-
     String requestFile = CONFIG_FILENAME;
+
     if (request->hasParam("file")) {
         String name = "/" + request->getParam("file")->value();
-        if (LittleFS.exists(name)) {
-            requestFile = name;
-        } else {
+        const bool allowReadonlyAccess = isReadonlyAllowedFile(name);
+
+        if (allowReadonlyAccess) {
+            if (!WebApi.checkCredentialsReadonly(request)) {
+                return;
+            }
+        } else if (!WebApi.checkCredentials(request)) {
+            return;
+        }
+
+        if (!LittleFS.exists(name)) {
             request->send(404);
             return;
         }
+
+        requestFile = name;
+    } else if (!WebApi.checkCredentials(request)) {
+        return;
     }
 
     request->send(LittleFS, requestFile, String(), true);

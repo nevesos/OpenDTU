@@ -1,6 +1,7 @@
 {
     "menu": {
         "LiveView": "Live-Ansicht",
+        "ModuleOverview": "Modulübersicht",
         "Settings": "Einstellungen",
         "NetworkSettings": "Netzwerk",
         "NTPSettings": "NTP",
@@ -50,6 +51,32 @@
     "dataagedisplay": {
         "DataAge": "Letzte Aktualisierung",
         "SecondsSince": "vor 0 Sekunden | vor 1 Sekunde | vor {n} Sekunden"
+    },
+    "moduleoverview": {
+        "Title": "Modulübersicht",
+        "Modules": "Module",
+        "Producing": "Produzierend",
+        "Offline": "Offline",
+        "EditMode": "Bearbeiten",
+        "Arrange": "Anordnen",
+        "SaveLayout": "Speichern",
+        "LoadLayoutFailed": "Die gespeicherte Modulübersicht konnte nicht geladen werden.",
+        "DrawBackground": "Zeichnen",
+        "Undo": "Rückgängig",
+        "ClearBackground": "Hintergrund löschen",
+        "ConfirmDeleteShape": "Diese Form löschen?",
+        "DrawColor": "Zeichenfarbe",
+        "DrawWidth": "Strichstärke",
+        "ShowDisabled": "Deaktivierte anzeigen",
+        "HeatmapNone": "Keine Heatmap",
+        "HeatmapPower": "Heatmap: Leistung",
+        "HeatmapPowerMax": "Heatmap: Leistung / Maximum",
+        "HeatmapPowerDiff": "Heatmap: Leistungsdifferenz",
+        "HeatmapYieldDay": "Heatmap: Tagesertrag",
+        "HeatmapYieldDayDiff": "Heatmap: Tagesertragsdifferenz",
+        "Zoom": "Zoom",
+        "NoModules": "Keine Modulwerte gefunden.",
+        "Channel": "Kanal {channel}"
     },
     "apiresponse": {
         "1001": "Einstellungen gespeichert!",
