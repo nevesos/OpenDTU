@@ -580,6 +580,59 @@ bool formatTargetName(char* output, const size_t outputSize, const TargetType ta
     return std::snprintf(output, outputSize, "inv_%" PRIu64, serial) > 0;
 }
 
+bool isLeapYear(const uint16_t year)
+{
+    return (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+}
+
+uint8_t daysInMonth(const uint16_t year, const uint8_t month)
+{
+    static constexpr uint8_t DaysPerMonth[] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+    if (month < 1 || month > 12) {
+        return 0;
+    }
+
+    if (month == 2 && isLeapYear(year)) {
+        return 29;
+    }
+
+    return DaysPerMonth[month - 1];
+}
+
+uint16_t dayOfYear(const uint16_t year, const uint8_t month, const uint8_t day)
+{
+    if (month < 1 || month > 12 || day < 1 || day > daysInMonth(year, month)) {
+        return 0;
+    }
+
+    uint16_t value = day;
+    for (uint8_t m = 1; m < month; m++) {
+        value += daysInMonth(year, m);
+    }
+
+    return value;
+}
+
+uint16_t firstDayOfYearForMonth(const uint16_t year, const uint8_t month)
+{
+    return dayOfYear(year, month, 1);
+}
+
+uint16_t saturateUint16(const uint32_t value)
+{
+    return value > UINT16_MAX ? UINT16_MAX : static_cast<uint16_t>(value);
+}
+
+uint16_t averagePowerW(const uint32_t yieldWh, const uint32_t runtimeMin)
+{
+    if (runtimeMin == 0) {
+        return 0;
+    }
+
+    const uint64_t value = (static_cast<uint64_t>(yieldWh) * 60U + runtimeMin / 2U) / runtimeMin;
+    return value > UINT16_MAX ? UINT16_MAX : static_cast<uint16_t>(value);
+}
+
 } // namespace
 
 EnergyHistoryClass EnergyHistory;
@@ -1234,4 +1287,242 @@ bool EnergyHistoryClass::readDayFile(const char* path, const FileHeader& expecte
 bool EnergyHistoryClass::readMonthFile(const char* path, const FileHeader& expectedHeader, MonthRecord* records, const uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result)
 {
     return readRecordFile(path, expectedHeader, FileType::Month, MonthRecordSize, records, recordCapacity, recordCount, result, decodeMonthRecord, upsertMonthRecord);
+}
+
+bool EnergyHistoryClass::buildDayRecordFromFiveMinute(const TargetType targetType, const uint64_t serial, const uint16_t year, const uint8_t month, const uint8_t day, DayRecord& record)
+{
+    const uint16_t doy = dayOfYear(year, month, day);
+    if (doy == 0) {
+        return false;
+    }
+
+    FileHeader header;
+    if (!makeFileHeader(FileType::FiveMinute, targetType, serial, year, month, header)) {
+        return false;
+    }
+
+    const String path = makeFiveMinutePath(targetType, serial, year, month);
+    if (path.isEmpty()) {
+        return false;
+    }
+
+    File file = LittleFS.open(path.c_str(), "r", false);
+    if (!file || file.size() < FileHeaderSize || !readValidatedFileHeader(file, header)) {
+        return false;
+    }
+
+    const size_t fileSize = file.size();
+    bool slotsPresent[FiveMinuteSlotsPerDay] = {};
+    FiveMinuteRecord slots[FiveMinuteSlotsPerDay] = {};
+
+    while (file.available() > 0) {
+        const size_t remaining = fileSize - file.position();
+        if (remaining < BlockHeaderSize) {
+            break;
+        }
+
+        uint8_t encodedBlockHeader[BlockHeaderSize];
+        if (!readFull(file, encodedBlockHeader, sizeof(encodedBlockHeader))) {
+            break;
+        }
+
+        BlockHeader blockHeader;
+        if (!decodeBlockHeader(encodedBlockHeader, sizeof(encodedBlockHeader), blockHeader)
+                || blockHeader.recordCount == 0
+                || blockHeader.payloadSize == 0
+                || blockHeader.payloadSize != blockHeader.recordCount * FiveMinuteRecordSize
+                || fileSize - file.position() < blockHeader.payloadSize) {
+            break;
+        }
+
+        const size_t payloadStart = file.position();
+        uint32_t crc = 0xffffffff;
+        uint16_t bytesRemaining = blockHeader.payloadSize;
+        uint8_t buffer[FileReadBufferSize];
+        while (bytesRemaining > 0) {
+            const size_t chunkSize = bytesRemaining < sizeof(buffer) ? bytesRemaining : sizeof(buffer);
+            if (!readFull(file, buffer, chunkSize)) {
+                return false;
+            }
+
+            crc = updateCrc32(crc, buffer, chunkSize);
+            bytesRemaining -= chunkSize;
+        }
+
+        if (blockHeader.crc32Payload != finalizeCrc32(crc)) {
+            continue;
+        }
+
+        if (!file.seek(payloadStart)) {
+            return false;
+        }
+
+        for (uint16_t i = 0; i < blockHeader.recordCount; i++) {
+            uint8_t encodedRecord[FiveMinuteRecordSize];
+            if (!readFull(file, encodedRecord, sizeof(encodedRecord))) {
+                return false;
+            }
+
+            FiveMinuteRecord sample;
+            if (!decodeFiveMinuteRecord(encodedRecord, sizeof(encodedRecord), sample)
+                    || sample.day != day
+                    || (sample.flags & RecordFlagValid) == 0) {
+                continue;
+            }
+
+            slots[sample.slot] = sample;
+            slotsPresent[sample.slot] = true;
+        }
+    }
+
+    std::memset(&record, 0, sizeof(record));
+    record.dayOfYear = doy;
+    uint32_t maxYieldWh = 0;
+    uint32_t maxPowerW = 0;
+    uint32_t runtimeMin = 0;
+    uint16_t sampleCount = 0;
+    uint16_t previousSlot = 0;
+    uint32_t previousYieldWh = 0;
+    bool previousValid = false;
+
+    for (uint16_t slot = 0; slot < FiveMinuteSlotsPerDay; slot++) {
+        if (!slotsPresent[slot]) {
+            continue;
+        }
+
+        const FiveMinuteRecord& sample = slots[slot];
+        sampleCount++;
+        if ((sample.flags & RecordFlagReachable) != 0) {
+            record.flags |= RecordFlagReachable;
+        }
+        if ((sample.flags & RecordFlagProducing) != 0) {
+            record.flags |= RecordFlagProducing;
+            runtimeMin += FiveMinuteIntervalSec / 60;
+        }
+        if ((sample.flags & RecordFlagEstimated) != 0) {
+            record.flags |= RecordFlagEstimated;
+        }
+
+        if (sample.yieldDayWh > maxYieldWh) {
+            maxYieldWh = sample.yieldDayWh;
+        }
+
+        if (previousValid) {
+            if (sample.yieldDayWh < previousYieldWh) {
+                record.flags |= RecordFlagDayResetDetected;
+            } else if (slot > previousSlot && sample.yieldDayWh > previousYieldWh) {
+                const uint32_t deltaWh = sample.yieldDayWh - previousYieldWh;
+                const uint32_t deltaSec = static_cast<uint32_t>(slot - previousSlot) * FiveMinuteIntervalSec;
+                const uint32_t powerW = (deltaWh * 3600U + deltaSec / 2U) / deltaSec;
+                if (powerW > maxPowerW) {
+                    maxPowerW = powerW;
+                }
+            }
+        }
+
+        previousSlot = slot;
+        previousYieldWh = sample.yieldDayWh;
+        previousValid = true;
+    }
+
+    if (sampleCount == 0) {
+        return false;
+    }
+
+    record.yieldWh = maxYieldWh;
+    record.maxPowerW = saturateUint16(maxPowerW);
+    record.runtimeMin = saturateUint16(runtimeMin);
+    record.sampleCount = sampleCount;
+    record.avgPowerW = averagePowerW(record.yieldWh, record.runtimeMin);
+    record.flags |= RecordFlagValid;
+    return true;
+}
+
+bool EnergyHistoryClass::buildMonthRecordFromDay(const TargetType targetType, const uint64_t serial, const uint16_t year, const uint8_t month, MonthRecord& record)
+{
+    const uint16_t firstDay = firstDayOfYearForMonth(year, month);
+    const uint8_t monthDays = daysInMonth(year, month);
+    if (firstDay == 0 || monthDays == 0) {
+        return false;
+    }
+
+    FileHeader header;
+    if (!makeFileHeader(FileType::Day, targetType, serial, year, 0, header)) {
+        return false;
+    }
+
+    const String path = makeDayPath(targetType, serial, year);
+    if (path.isEmpty()) {
+        return false;
+    }
+
+    DayRecord days[366] = {};
+    bool daysPresent[31] = {};
+    uint16_t recordCount = 0;
+    ScanResult scan;
+    if (!readDayFile(path.c_str(), header, days, sizeof(days) / sizeof(days[0]), recordCount, scan)) {
+        return false;
+    }
+
+    for (uint16_t i = 0; i < recordCount; i++) {
+        if (days[i].dayOfYear < firstDay || days[i].dayOfYear >= firstDay + monthDays) {
+            continue;
+        }
+
+        const uint8_t index = static_cast<uint8_t>(days[i].dayOfYear - firstDay);
+        daysPresent[index] = true;
+    }
+
+    std::memset(&record, 0, sizeof(record));
+    record.month = month;
+    uint32_t yieldWh = 0;
+    uint32_t runtimeMin = 0;
+    uint16_t maxPowerW = 0;
+    uint16_t dayCount = 0;
+
+    for (uint8_t i = 0; i < monthDays; i++) {
+        if (!daysPresent[i] || (days[i].flags & RecordFlagValid) == 0) {
+            continue;
+        }
+
+        dayCount++;
+        yieldWh += days[i].yieldWh;
+        runtimeMin += days[i].runtimeMin;
+        if (days[i].maxPowerW > maxPowerW) {
+            maxPowerW = days[i].maxPowerW;
+        }
+
+        record.flags |= days[i].flags & KnownRecordFlagsMask;
+    }
+
+    if (dayCount == 0) {
+        return false;
+    }
+
+    record.yieldWh = yieldWh;
+    record.maxPowerW = maxPowerW;
+    record.runtimeMin = saturateUint16(runtimeMin);
+    record.dayCount = dayCount;
+    record.avgPowerW = averagePowerW(record.yieldWh, record.runtimeMin);
+    record.flags |= RecordFlagValid;
+    return true;
+}
+
+bool EnergyHistoryClass::finalizeCompletedPeriod(const TargetType targetType, const uint64_t serial, const uint16_t year, const uint8_t month, const uint8_t day, const bool finalizeMonth)
+{
+    DayRecord dayRecord;
+    if (!buildDayRecordFromFiveMinute(targetType, serial, year, month, day, dayRecord)) {
+        return false;
+    }
+
+    bool ok = writeDay(targetType, serial, year, &dayRecord, 1, dayRecord.dayOfYear);
+
+    if (finalizeMonth) {
+        MonthRecord monthRecord;
+        ok = buildMonthRecordFromDay(targetType, serial, year, month, monthRecord)
+                && writeMonth(targetType, serial, year, &monthRecord, 1, month)
+                && ok;
+    }
+
+    return ok;
 }

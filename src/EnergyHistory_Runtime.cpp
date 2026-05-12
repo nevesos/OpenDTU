@@ -70,6 +70,30 @@ bool EnergyHistoryClass::persistCurrentFiveMinuteSlot()
         return true;
     }
 
+    const bool dateChanged = _lastFiveMinuteSlotValid
+            && (_lastFiveMinuteYear != year
+                    || _lastFiveMinuteMonth != month
+                    || _lastFiveMinuteDay != day);
+    const bool monthChanged = dateChanged
+            && (_lastFiveMinuteYear != year || _lastFiveMinuteMonth != month);
+    if (dateChanged) {
+        finalizeCompletedPeriod(TargetType::Total, 0, _lastFiveMinuteYear, _lastFiveMinuteMonth, _lastFiveMinuteDay, monthChanged);
+
+        for (uint8_t i = 0; i < Hoymiles.getNumInverters(); i++) {
+            auto inv = Hoymiles.getInverterByPos(i);
+            if (inv == nullptr) {
+                continue;
+            }
+
+            auto cfg = Configuration.getInverterConfig(inv->serial());
+            if (cfg == nullptr || !cfg->Poll_Enable) {
+                continue;
+            }
+
+            finalizeCompletedPeriod(TargetType::Inverter, inv->serial(), _lastFiveMinuteYear, _lastFiveMinuteMonth, _lastFiveMinuteDay, monthChanged);
+        }
+    }
+
     const uint16_t blockIndex = static_cast<uint16_t>((day - 1) * FiveMinuteSlotsPerDay + slot);
     FiveMinuteRecord record;
     record.day = day;

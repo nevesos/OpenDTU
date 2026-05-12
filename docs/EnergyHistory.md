@@ -185,6 +185,15 @@ Daily and monthly aggregates should be append/update-log style where practical.
 If duplicate aggregate records exist, the last valid record for the same key
 wins.
 
+Daily aggregates are derived from valid five-minute samples for the completed
+local day. `yieldWh` is the highest daily yield seen for the day. `maxPowerW` is
+derived from the largest positive yield delta between consecutive samples.
+`runtimeMin` counts samples marked as producing in five-minute increments.
+
+Monthly aggregates are derived from daily aggregate records for the completed
+local month. `yieldWh` is the sum of daily yields, `maxPowerW` is the highest
+daily max power, and `runtimeMin` is the sum of daily runtime minutes.
+
 ## Retention
 
 Default proposal:

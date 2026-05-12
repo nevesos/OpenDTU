@@ -163,6 +163,9 @@ private:
     bool readMonthFile(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, EnergyHistoryFormat::MonthRecord* records, uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result);
     bool runManualPersistenceProbe(ManualProbeResult& result);
     bool persistCurrentFiveMinuteSlot();
+    bool finalizeCompletedPeriod(EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, uint8_t month, uint8_t day, bool finalizeMonth);
+    bool buildDayRecordFromFiveMinute(EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, uint8_t month, uint8_t day, EnergyHistoryFormat::DayRecord& record);
+    bool buildMonthRecordFromDay(EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, uint8_t month, EnergyHistoryFormat::MonthRecord& record);
 
     Task _loopTask;
     bool _lastFiveMinuteSlotValid = false;
