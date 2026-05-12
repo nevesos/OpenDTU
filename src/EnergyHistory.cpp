@@ -4,7 +4,9 @@
  */
 #include "EnergyHistory.h"
 #include <LittleFS.h>
+#include <cstdio>
 #include <cstring>
+#include <inttypes.h>
 
 namespace {
 
@@ -521,6 +523,27 @@ bool upsertFiveMinuteRecord(FiveMinuteRecord* records, const uint16_t recordCapa
     return true;
 }
 
+bool formatTargetName(char* output, const size_t outputSize, const TargetType targetType, const uint64_t serial)
+{
+    if (output == nullptr || outputSize == 0) {
+        return false;
+    }
+
+    if (targetType == TargetType::Total) {
+        if (serial != 0) {
+            return false;
+        }
+
+        return std::snprintf(output, outputSize, "total") > 0;
+    }
+
+    if (targetType != TargetType::Inverter || serial == 0) {
+        return false;
+    }
+
+    return std::snprintf(output, outputSize, "inv_%" PRIu64, serial) > 0;
+}
+
 } // namespace
 
 EnergyHistoryClass EnergyHistory;
@@ -540,6 +563,72 @@ void EnergyHistoryClass::loop()
 {
     // Persistence is intentionally not wired yet. See docs/EnergyHistory.md
     // for the on-flash format and retention rules.
+}
+
+bool EnergyHistoryClass::makeFileHeader(const FileType fileType, const TargetType targetType, const uint64_t serial, const uint16_t year, const uint8_t month, FileHeader& header)
+{
+    std::memset(&header, 0, sizeof(header));
+    std::memcpy(header.magic, FileMagic, sizeof(header.magic));
+    header.fileType = static_cast<uint8_t>(fileType);
+    header.version = Version;
+    header.headerSize = FileHeaderSize;
+    header.recordSize = expectedRecordSize(fileType);
+    header.year = year;
+    header.month = fileType == FileType::FiveMinute ? month : 0;
+    header.targetType = static_cast<uint8_t>(targetType);
+    header.serial = serial;
+    header.intervalSec = fileType == FileType::FiveMinute ? FiveMinuteIntervalSec : 0;
+
+    return validateHeaderFields(header);
+}
+
+String EnergyHistoryClass::makeFiveMinutePath(const TargetType targetType, const uint64_t serial, const uint16_t year, const uint8_t month)
+{
+    if (month < 1 || month > 12) {
+        return String();
+    }
+
+    char targetName[32];
+    if (!formatTargetName(targetName, sizeof(targetName), targetType, serial)) {
+        return String();
+    }
+
+    char path[80];
+    if (std::snprintf(path, sizeof(path), "%s/%s_%04u_%02u.eh5", FiveMinuteDirectory, targetName, year, month) <= 0) {
+        return String();
+    }
+
+    return String(path);
+}
+
+String EnergyHistoryClass::makeDayPath(const TargetType targetType, const uint64_t serial, const uint16_t year)
+{
+    char targetName[32];
+    if (!formatTargetName(targetName, sizeof(targetName), targetType, serial)) {
+        return String();
+    }
+
+    char path[80];
+    if (std::snprintf(path, sizeof(path), "%s/%s_%04u.ehd", DayDirectory, targetName, year) <= 0) {
+        return String();
+    }
+
+    return String(path);
+}
+
+String EnergyHistoryClass::makeMonthPath(const TargetType targetType, const uint64_t serial, const uint16_t year)
+{
+    char targetName[32];
+    if (!formatTargetName(targetName, sizeof(targetName), targetType, serial)) {
+        return String();
+    }
+
+    char path[80];
+    if (std::snprintf(path, sizeof(path), "%s/%s_%04u.ehm", MonthDirectory, targetName, year) <= 0) {
+        return String();
+    }
+
+    return String(path);
 }
 
 bool EnergyHistoryClass::appendBlock(const char* path, const FileHeader& expectedHeader, const uint16_t blockIndex, const uint16_t startKey, const uint8_t* payload, const uint16_t payloadSize, const uint16_t recordCount)
