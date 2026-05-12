@@ -11,7 +11,7 @@
             {{ alert.message }}
         </BootstrapAlert>
 
-        <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between mb-3">
+        <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
             <div class="d-flex flex-wrap gap-2 align-items-center module-overview-status-row">
                 <InverterTotalInfo
                     v-if="liveData.total"
@@ -46,86 +46,78 @@
                     </div>
                 </div>
             </div>
-            <div class="d-flex flex-wrap gap-2 align-items-center module-overview-toolbar">
-                <select v-model="heatmapMode" class="form-select form-select-sm module-overview-select">
-                    <option value="none">{{ $t('moduleoverview.HeatmapNone') }}</option>
-                    <option value="power">{{ $t('moduleoverview.HeatmapPower') }}</option>
-                    <option value="powerMax">{{ $t('moduleoverview.HeatmapPowerMax') }}</option>
-                    <option value="powerDiff">{{ $t('moduleoverview.HeatmapPowerDiff') }}</option>
-                    <option value="yieldDay">{{ $t('moduleoverview.HeatmapYieldDay') }}</option>
-                    <option value="yieldDayDiff">{{ $t('moduleoverview.HeatmapYieldDayDiff') }}</option>
-                </select>
-                <select v-model.number="zoomFactor" class="form-select form-select-sm module-overview-select" :title="$t('moduleoverview.Zoom')">
-                    <option :value="0.5">50%</option>
-                    <option :value="0.75">75%</option>
-                    <option :value="1">100%</option>
-                    <option :value="1.25">125%</option>
-                    <option :value="1.5">150%</option>
-                </select>
-                <div class="form-check form-switch mb-0">
-                    <input
-                        id="showDisabledModules"
-                        v-model="showDisabledModules"
-                        class="form-check-input"
-                        type="checkbox"
-                    />
-                    <label class="form-check-label" for="showDisabledModules">
-                        {{ $t('moduleoverview.ShowDisabled') }}
-                    </label>
-                </div>
-                <div class="d-flex flex-wrap gap-2 align-items-center module-overview-edit-toolbar">
-                    <div class="btn-group" :class="{ invisible: !editMode }" role="group">
-                        <button
-                            type="button"
-                            class="btn btn-outline-primary"
-                            :class="{ active: backgroundDrawMode }"
-                            :disabled="!editMode"
-                            @click="toggleBackgroundDrawMode"
-                        >
-                            <BIconBrush />&nbsp;{{ $t('moduleoverview.DrawBackground') }}
-                        </button>
-                        <button type="button" class="btn btn-outline-secondary" :disabled="!editMode || backgroundPaths.length === 0" @click="undoBackgroundPath">
-                            <BIconArrowCounterclockwise />&nbsp;{{ $t('moduleoverview.Undo') }}
-                        </button>
-                        <button type="button" class="btn btn-outline-danger" :disabled="!editMode || backgroundPaths.length === 0" @click="clearBackground">
-                            <BIconTrash />&nbsp;{{ $t('moduleoverview.ClearBackground') }}
-                        </button>
-                    </div>
-                    <div class="d-flex align-items-center gap-2 module-overview-draw-tools" :class="{ invisible: !editMode }">
-                        <input v-model="backgroundStrokeColor" class="form-control form-control-color" type="color" :title="$t('moduleoverview.DrawColor')" />
-                        <input
-                            v-model.number="backgroundStrokeWidth"
-                            class="form-range module-overview-stroke-width"
-                            type="range"
-                            min="1"
-                            max="20"
-                            :title="$t('moduleoverview.DrawWidth')"
-                        />
-                    </div>
-                    <div class="btn-group" role="group">
-                        <button
-                            type="button"
-                            class="btn btn-outline-secondary"
-                            :class="{ invisible: !editMode }"
-                            :disabled="!editMode"
-                            @click="arrangeModules"
-                        >
-                            <BIconGrid3x3Gap />&nbsp;{{ $t('moduleoverview.Arrange') }}
-                        </button>
-                        <button
-                            type="button"
-                            class="btn btn-primary"
-                            :class="{ invisible: !editMode }"
-                            :disabled="!isLogged || !editMode || layoutSaving"
-                            @click="saveLayout"
-                        >
-                            <BIconSave />&nbsp;{{ $t('moduleoverview.SaveLayout') }}
-                        </button>
-                        <button type="button" class="btn btn-outline-primary" :class="{ active: editMode }" :disabled="!isLogged" @click="toggleEditMode">
-                            <BIconPencilSquare />&nbsp;{{ $t('moduleoverview.EditMode') }}
-                        </button>
-                    </div>
-                </div>
+        </div>
+
+        <div class="d-flex flex-wrap gap-2 align-items-center module-overview-toolbar mb-3">
+            <select v-model="heatmapMode" class="form-select form-select-sm module-overview-select">
+                <option value="none">{{ $t('moduleoverview.HeatmapNone') }}</option>
+                <option value="power">{{ $t('moduleoverview.HeatmapPower') }}</option>
+                <option value="powerMax">{{ $t('moduleoverview.HeatmapPowerMax') }}</option>
+                <option value="powerDiff">{{ $t('moduleoverview.HeatmapPowerDiff') }}</option>
+                <option value="yieldDay">{{ $t('moduleoverview.HeatmapYieldDay') }}</option>
+                <option value="yieldDayDiff">{{ $t('moduleoverview.HeatmapYieldDayDiff') }}</option>
+            </select>
+            <select v-model.number="zoomFactor" class="form-select form-select-sm module-overview-select" :title="$t('moduleoverview.Zoom')">
+                <option :value="0.5">50%</option>
+                <option :value="0.75">75%</option>
+                <option :value="1">100%</option>
+                <option :value="1.25">125%</option>
+                <option :value="1.5">150%</option>
+            </select>
+            <div class="form-check form-switch mb-0">
+                <input
+                    id="showDisabledModules"
+                    v-model="showDisabledModules"
+                    class="form-check-input"
+                    type="checkbox"
+                />
+                <label class="form-check-label" for="showDisabledModules">
+                    {{ $t('moduleoverview.ShowDisabled') }}
+                </label>
+            </div>
+            <div class="btn-group module-overview-edit-mode-toggle" role="group">
+                <button type="button" class="btn btn-outline-primary" :class="{ active: editMode }" :disabled="!isLogged" @click="toggleEditMode">
+                    <BIconPencilSquare />&nbsp;{{ $t('moduleoverview.EditMode') }}
+                </button>
+            </div>
+        </div>
+
+        <div v-if="editMode" class="d-flex flex-wrap gap-2 align-items-center module-overview-edit-toolbar mb-3">
+            <div class="btn-group" role="group">
+                <button
+                    type="button"
+                    class="btn btn-outline-primary"
+                    :class="{ active: backgroundDrawMode }"
+                    :disabled="!editMode"
+                    @click="toggleBackgroundDrawMode"
+                >
+                    <BIconBrush />&nbsp;{{ $t('moduleoverview.DrawBackground') }}
+                </button>
+                <button type="button" class="btn btn-outline-secondary" :disabled="!editMode || backgroundPaths.length === 0" @click="undoBackgroundPath">
+                    <BIconArrowCounterclockwise />&nbsp;{{ $t('moduleoverview.Undo') }}
+                </button>
+                <button type="button" class="btn btn-outline-danger" :disabled="!editMode || backgroundPaths.length === 0" @click="clearBackground">
+                    <BIconTrash />&nbsp;{{ $t('moduleoverview.ClearBackground') }}
+                </button>
+            </div>
+            <div class="d-flex align-items-center gap-2 module-overview-draw-tools">
+                <input v-model="backgroundStrokeColor" class="form-control form-control-color" type="color" :title="$t('moduleoverview.DrawColor')" />
+                <input
+                    v-model.number="backgroundStrokeWidth"
+                    class="form-range module-overview-stroke-width"
+                    type="range"
+                    min="1"
+                    max="20"
+                    :title="$t('moduleoverview.DrawWidth')"
+                />
+            </div>
+            <div class="btn-group" role="group">
+                <button type="button" class="btn btn-outline-secondary" :disabled="!editMode" @click="arrangeModules">
+                    <BIconGrid3x3Gap />&nbsp;{{ $t('moduleoverview.Arrange') }}
+                </button>
+                <button type="button" class="btn btn-primary" :disabled="!isLogged || !editMode || layoutSaving" @click="saveLayout">
+                    <BIconSave />&nbsp;{{ $t('moduleoverview.SaveLayout') }}
+                </button>
             </div>
         </div>
 
