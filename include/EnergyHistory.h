@@ -157,8 +157,14 @@ private:
     bool readDayFile(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, EnergyHistoryFormat::DayRecord* records, uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result);
     bool readMonthFile(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, EnergyHistoryFormat::MonthRecord* records, uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result);
     bool runManualPersistenceProbe(ManualProbeResult& result);
+    bool persistCurrentFiveMinuteSlot();
 
     Task _loopTask;
+    bool _lastFiveMinuteSlotValid = false;
+    uint16_t _lastFiveMinuteYear = 0;
+    uint8_t _lastFiveMinuteMonth = 0;
+    uint8_t _lastFiveMinuteDay = 0;
+    uint16_t _lastFiveMinuteSlot = 0;
 };
 
 extern EnergyHistoryClass EnergyHistory;

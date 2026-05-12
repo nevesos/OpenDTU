@@ -657,12 +657,6 @@ void EnergyHistoryClass::init(Scheduler& scheduler)
     _loopTask.enable();
 }
 
-void EnergyHistoryClass::loop()
-{
-    // Persistence is intentionally not wired yet. See docs/EnergyHistory.md
-    // for the on-flash format and retention rules.
-}
-
 bool EnergyHistoryClass::makeFileHeader(const FileType fileType, const TargetType targetType, const uint64_t serial, const uint16_t year, const uint8_t month, FileHeader& header)
 {
     std::memset(&header, 0, sizeof(header));

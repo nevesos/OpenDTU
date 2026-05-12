@@ -5,7 +5,7 @@
 #include "Configuration.h"
 #include "Datastore.h"
 #include "Display_Graphic.h"
-#if defined(ENERGY_HISTORY_MANUAL_PROBE)
+#if defined(ENERGY_HISTORY_ENABLE) || defined(ENERGY_HISTORY_MANUAL_PROBE)
 #include "EnergyHistory.h"
 #endif
 #include "I18n.h"
@@ -106,8 +106,8 @@ void setup()
     ESP_LOGI(TAG, "Initializing SunPosition...");
     SunPosition.init(scheduler);
 
-#if defined(ENERGY_HISTORY_MANUAL_PROBE)
-    ESP_LOGI(TAG, "Initializing EnergyHistory probe...");
+#if defined(ENERGY_HISTORY_ENABLE) || defined(ENERGY_HISTORY_MANUAL_PROBE)
+    ESP_LOGI(TAG, "Initializing EnergyHistory...");
     EnergyHistory.init(scheduler);
 #endif
 
