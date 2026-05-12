@@ -1497,7 +1497,7 @@ export default defineComponent({
         heatmapColorStyle(ratio: number) {
             const normalizedRatio = Math.min(1, Math.max(0, ratio));
             const hue = 210 - normalizedRatio * 150;
-            const backgroundLightness = 96 - normalizedRatio * 24;
+            const backgroundLightness = 88 - normalizedRatio * 16;
             const borderLightness = 58 - normalizedRatio * 18;
 
             return {
@@ -1688,7 +1688,7 @@ export default defineComponent({
     height: 0.75rem;
     border: 1px solid var(--bs-border-color-translucent);
     border-radius: 999px;
-    background: linear-gradient(90deg, hsl(210deg 85% 96%), hsl(135deg 85% 84%), hsl(60deg 85% 72%));
+    background: linear-gradient(90deg, hsl(210deg 85% 88%), hsl(135deg 85% 80%), hsl(60deg 85% 72%));
 }
 
 .module-overview-heatmap-range {
