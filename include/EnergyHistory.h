@@ -121,6 +121,7 @@ private:
         bool corruptHeaderOk = false;
         bool corruptCrcOk = false;
         bool incompleteFinalBlockOk = false;
+        bool truncateFinalBlockOk = false;
         bool smallBufferOk = false;
         bool cleanupOk = false;
         uint16_t fiveMinuteRecordsRead = 0;
@@ -149,6 +150,10 @@ private:
     bool appendFiveMinuteBlock(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, const EnergyHistoryFormat::FiveMinuteRecord* records, uint16_t recordCount, uint16_t blockIndex);
     bool appendDayBlock(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, const EnergyHistoryFormat::DayRecord* records, uint16_t recordCount, uint16_t blockIndex);
     bool appendMonthBlock(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, const EnergyHistoryFormat::MonthRecord* records, uint16_t recordCount, uint16_t blockIndex);
+    bool recoverFinalBlock(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, ScanResult& result);
+    bool truncateFile(const char* path, size_t size);
+    void recoverExistingEnergyFiles();
+    void recoverEnergyDirectory(const char* directoryPath);
     bool scanFile(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, ScanResult& result);
     bool scanFiveMinuteFile(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, ScanResult& result);
     template <typename Record>

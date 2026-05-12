@@ -493,23 +493,6 @@ bool readValidatedFileHeader(File& file, const FileHeader& expectedHeader)
             && headersMatch(decodedHeader, expectedHeader);
 }
 
-bool skipBytes(File& file, const size_t length)
-{
-    uint8_t buffer[FileReadBufferSize];
-    size_t remaining = length;
-
-    while (remaining > 0) {
-        const size_t chunkSize = remaining < sizeof(buffer) ? remaining : sizeof(buffer);
-        if (!readFull(file, buffer, chunkSize)) {
-            return false;
-        }
-
-        remaining -= chunkSize;
-    }
-
-    return true;
-}
-
 bool upsertFiveMinuteRecord(FiveMinuteRecord* records, const uint16_t recordCapacity, uint16_t& recordCount, const FiveMinuteRecord& record)
 {
     if (records == nullptr || recordCapacity == 0) {
@@ -615,7 +598,7 @@ void EnergyHistoryClass::init(Scheduler& scheduler)
     if (probeOk) {
         ESP_LOGI(
                 EnergyHistoryTag,
-                "Manual persistence probe ok: 5m=%u day=%u month=%u headerMismatch=%u corruptHeader=%u corruptCrc=%u incompleteFinal=%u smallBuffer=%u cleanup=%u records=%u/%u/%u blocks=%" PRIu32 "/%" PRIu32 "/%" PRIu32,
+                "Manual persistence probe ok: 5m=%u day=%u month=%u headerMismatch=%u corruptHeader=%u corruptCrc=%u incompleteFinal=%u truncateFinal=%u smallBuffer=%u cleanup=%u records=%u/%u/%u blocks=%" PRIu32 "/%" PRIu32 "/%" PRIu32,
                 probe.fiveMinuteOk,
                 probe.dayOk,
                 probe.monthOk,
@@ -623,6 +606,7 @@ void EnergyHistoryClass::init(Scheduler& scheduler)
                 probe.corruptHeaderOk,
                 probe.corruptCrcOk,
                 probe.incompleteFinalBlockOk,
+                probe.truncateFinalBlockOk,
                 probe.smallBufferOk,
                 probe.cleanupOk,
                 probe.fiveMinuteRecordsRead,
@@ -634,7 +618,7 @@ void EnergyHistoryClass::init(Scheduler& scheduler)
     } else {
         ESP_LOGE(
                 EnergyHistoryTag,
-                "Manual persistence probe failed: 5m=%u day=%u month=%u headerMismatch=%u corruptHeader=%u corruptCrc=%u incompleteFinal=%u smallBuffer=%u cleanup=%u records=%u/%u/%u blocks=%" PRIu32 "/%" PRIu32 "/%" PRIu32,
+                "Manual persistence probe failed: 5m=%u day=%u month=%u headerMismatch=%u corruptHeader=%u corruptCrc=%u incompleteFinal=%u truncateFinal=%u smallBuffer=%u cleanup=%u records=%u/%u/%u blocks=%" PRIu32 "/%" PRIu32 "/%" PRIu32,
                 probe.fiveMinuteOk,
                 probe.dayOk,
                 probe.monthOk,
@@ -642,6 +626,7 @@ void EnergyHistoryClass::init(Scheduler& scheduler)
                 probe.corruptHeaderOk,
                 probe.corruptCrcOk,
                 probe.incompleteFinalBlockOk,
+                probe.truncateFinalBlockOk,
                 probe.smallBufferOk,
                 probe.cleanupOk,
                 probe.fiveMinuteRecordsRead,
@@ -652,6 +637,8 @@ void EnergyHistoryClass::init(Scheduler& scheduler)
                 probe.monthScan.validBlocks);
     }
 #endif
+
+    recoverExistingEnergyFiles();
 
     scheduler.addTask(_loopTask);
     _loopTask.enable();
@@ -826,6 +813,11 @@ bool EnergyHistoryClass::appendBlock(const char* path, const FileHeader& expecte
         return false;
     }
 
+    ScanResult recoveryScan;
+    if (!recoverFinalBlock(path, expectedHeader, recoveryScan)) {
+        return false;
+    }
+
     BlockHeader blockHeader;
     std::memcpy(blockHeader.magic, BlockMagic, sizeof(blockHeader.magic));
     blockHeader.blockIndex = blockIndex;
@@ -916,6 +908,111 @@ bool EnergyHistoryClass::appendMonthBlock(const char* path, const FileHeader& ex
     return appendBlock(path, expectedHeader, blockIndex, records[0].month, payload, recordCount * MonthRecordSize, recordCount);
 }
 
+bool EnergyHistoryClass::truncateFile(const char* path, const size_t size)
+{
+    if (path == nullptr || size < FileHeaderSize) {
+        return false;
+    }
+
+    File source = LittleFS.open(path, "r", false);
+    if (!source || source.size() < size) {
+        return false;
+    }
+
+    if (source.size() == size) {
+        return true;
+    }
+
+    const String tempPath = String(path) + ".tmp";
+    LittleFS.remove(tempPath);
+
+    File target = LittleFS.open(tempPath, "w");
+    if (!target) {
+        return false;
+    }
+
+    uint8_t buffer[FileReadBufferSize];
+    size_t remaining = size;
+    while (remaining > 0) {
+        const size_t chunkSize = remaining < sizeof(buffer) ? remaining : sizeof(buffer);
+        if (!readFull(source, buffer, chunkSize) || !writeFull(target, buffer, chunkSize)) {
+            source.close();
+            target.close();
+            LittleFS.remove(tempPath);
+            return false;
+        }
+
+        remaining -= chunkSize;
+    }
+
+    target.flush();
+    source.close();
+    target.close();
+
+    if (!LittleFS.remove(path)) {
+        LittleFS.remove(tempPath);
+        return false;
+    }
+
+    if (!LittleFS.rename(tempPath, path)) {
+        LittleFS.remove(tempPath);
+        return false;
+    }
+
+    return true;
+}
+
+bool EnergyHistoryClass::recoverFinalBlock(const char* path, const FileHeader& expectedHeader, ScanResult& result)
+{
+    result = ScanResult();
+    if (!scanFile(path, expectedHeader, result)) {
+        return false;
+    }
+
+    if (!result.canTruncateFinalBlock) {
+        return true;
+    }
+
+    return truncateFile(path, result.lastValidOffset);
+}
+
+void EnergyHistoryClass::recoverExistingEnergyFiles()
+{
+    recoverEnergyDirectory(FiveMinuteDirectory);
+    recoverEnergyDirectory(DayDirectory);
+    recoverEnergyDirectory(MonthDirectory);
+}
+
+void EnergyHistoryClass::recoverEnergyDirectory(const char* directoryPath)
+{
+    File directory = LittleFS.open(directoryPath, "r", false);
+    if (!directory || !directory.isDirectory()) {
+        return;
+    }
+
+    File file = directory.openNextFile();
+    while (file) {
+        if (!file.isDirectory() && file.size() >= FileHeaderSize) {
+            const String fileName = file.name();
+            String path = fileName;
+            if (!fileName.startsWith("/")) {
+                path = String(directoryPath) + "/" + fileName;
+            }
+
+            uint8_t encodedHeader[FileHeaderSize];
+            if (file.read(encodedHeader, sizeof(encodedHeader)) == FileHeaderSize) {
+                FileHeader header;
+                ScanResult result;
+                if (decodeFileHeader(encodedHeader, sizeof(encodedHeader), header)) {
+                    recoverFinalBlock(path.c_str(), header, result);
+                }
+            }
+        }
+
+        file = directory.openNextFile();
+    }
+}
+
 bool EnergyHistoryClass::scanFile(const char* path, const FileHeader& expectedHeader, ScanResult& result)
 {
     if (path == nullptr) {
@@ -954,10 +1051,8 @@ bool EnergyHistoryClass::scanFile(const char* path, const FileHeader& expectedHe
                 || blockHeader.payloadSize == 0
                 || blockHeader.payloadSize != blockHeader.recordCount * expectedHeader.recordSize) {
             result.skippedBlocks++;
-            if (!skipBytes(file, remaining - BlockHeaderSize)) {
-                result.invalidFinalBlock = true;
-                result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
-            }
+            result.invalidFinalBlock = true;
+            result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
             break;
         }
 
@@ -987,6 +1082,10 @@ bool EnergyHistoryClass::scanFile(const char* path, const FileHeader& expectedHe
 
         if (blockHeader.crc32Payload != finalizeCrc32(crc)) {
             result.skippedBlocks++;
+            if (file.position() == result.fileSize) {
+                result.invalidFinalBlock = true;
+                result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
+            }
             continue;
         }
 
@@ -1048,10 +1147,8 @@ bool EnergyHistoryClass::readRecordFile(const char* path, const FileHeader& expe
                 || blockHeader.payloadSize == 0
                 || blockHeader.payloadSize != blockHeader.recordCount * recordSize) {
             result.skippedBlocks++;
-            if (!skipBytes(file, remaining - BlockHeaderSize)) {
-                result.invalidFinalBlock = true;
-                result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
-            }
+            result.invalidFinalBlock = true;
+            result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
             break;
         }
 
@@ -1082,6 +1179,10 @@ bool EnergyHistoryClass::readRecordFile(const char* path, const FileHeader& expe
 
         if (blockHeader.crc32Payload != finalizeCrc32(crc)) {
             result.skippedBlocks++;
+            if (file.position() == result.fileSize) {
+                result.invalidFinalBlock = true;
+                result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
+            }
             continue;
         }
 

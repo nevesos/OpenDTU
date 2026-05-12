@@ -174,7 +174,7 @@ Sampling interval:
 Persistence interval:
 
 ```text
-15 minutes, and additionally at day/month boundaries
+5 minutes, and additionally at day/month boundaries
 ```
 
 Five-minute data should be appended in small blocks. The API must deduplicate by

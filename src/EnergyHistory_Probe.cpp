@@ -52,6 +52,12 @@ bool overwriteProbeByte(const String& path, const size_t offset, const uint8_t v
     return file && file.seek(offset) && file.write(value) == 1;
 }
 
+size_t probeFileSize(const String& path)
+{
+    File file = LittleFS.open(path, "r", false);
+    return file ? file.size() : 0;
+}
+
 bool ensureProbeDirectory(const char* path)
 {
     if (LittleFS.mkdir(path)) {
@@ -231,8 +237,13 @@ bool EnergyHistoryClass::runManualPersistenceProbe(ManualProbeResult& result)
                 && result.corruptCrcScan.skippedBlocks == 1
                 && result.corruptCrcScan.validRecords == 0
                 && result.corruptCrcScan.skippedRecords == 0
-                && !result.corruptCrcScan.invalidFinalBlock
-                && !result.corruptCrcScan.canTruncateFinalBlock;
+                && result.corruptCrcScan.invalidFinalBlock
+                && result.corruptCrcScan.canTruncateFinalBlock;
+        ScanResult corruptCrcTruncateScan;
+        const bool corruptCrcTruncateOk = result.corruptCrcOk
+                && recoverFinalBlock(fiveMinutePath.c_str(), correctFiveMinuteHeader, corruptCrcTruncateScan)
+                && corruptCrcTruncateScan.canTruncateFinalBlock
+                && probeFileSize(fiveMinutePath) == FileHeaderSize;
 
         const uint8_t partialBlock[] = { 'E', 'H', 'B', '1' };
         uint16_t incompleteRecordCount = 0;
@@ -252,6 +263,25 @@ bool EnergyHistoryClass::runManualPersistenceProbe(ManualProbeResult& result)
                 && result.incompleteFinalBlockScan.canTruncateFinalBlock
                 && result.incompleteFinalBlockScan.lastValidOffset == result.incompleteFinalBlockScan.fileSize - sizeof(partialBlock);
 
+        ScanResult truncateScan;
+        ScanResult truncateVerifyScan;
+        uint16_t truncateVerifyRecordCount = 0;
+        FiveMinuteRecord truncateVerifyRecords[1];
+        const bool truncateOk = result.incompleteFinalBlockOk
+                && recoverFinalBlock(fiveMinutePath.c_str(), correctFiveMinuteHeader, truncateScan);
+        const bool truncateVerifyReadOk = truncateOk
+                && readFiveMinuteFile(fiveMinutePath.c_str(), correctFiveMinuteHeader, truncateVerifyRecords, 1, truncateVerifyRecordCount, truncateVerifyScan);
+        const bool incompleteTruncateOk = truncateOk
+                && truncateScan.canTruncateFinalBlock
+                && probeFileSize(fiveMinutePath) == result.incompleteFinalBlockScan.lastValidOffset
+                && truncateVerifyReadOk
+                && truncateVerifyRecordCount == 1
+                && truncateVerifyScan.validBlocks == 1
+                && truncateVerifyScan.skippedBlocks == 0
+                && !truncateVerifyScan.invalidFinalBlock
+                && !truncateVerifyScan.canTruncateFinalBlock;
+        result.truncateFinalBlockOk = corruptCrcTruncateOk && incompleteTruncateOk;
+
         uint16_t smallBufferRecordCount = 0;
         FiveMinuteRecord smallBufferRecords[1];
         const bool smallBufferWriteOk = truncateProbeFile(fiveMinutePath)
@@ -268,11 +298,12 @@ bool EnergyHistoryClass::runManualPersistenceProbe(ManualProbeResult& result)
                 && !result.smallBufferScan.canTruncateFinalBlock;
         ESP_LOGI(
                 ProbeTag,
-                "negative: headerMismatch=%u corruptHeader=%u corruptCrc=%u incompleteFinal=%u smallBuffer=%u",
+                "negative: headerMismatch=%u corruptHeader=%u corruptCrc=%u incompleteFinal=%u truncateFinal=%u smallBuffer=%u",
                 result.headerMismatchOk,
                 result.corruptHeaderOk,
                 result.corruptCrcOk,
                 result.incompleteFinalBlockOk,
+                result.truncateFinalBlockOk,
                 result.smallBufferOk);
     }
 
@@ -283,7 +314,7 @@ bool EnergyHistoryClass::runManualPersistenceProbe(ManualProbeResult& result)
     ESP_LOGI(ProbeTag, "cleanup: 5m=%u day=%u month=%u", removeFiveMinuteOk, removeDayOk, removeMonthOk);
     ESP_LOGI(
             ProbeTag,
-            "probe result: 5m=%u day=%u month=%u headerMismatch=%u corruptHeader=%u corruptCrc=%u incompleteFinal=%u smallBuffer=%u cleanup=%u",
+            "probe result: 5m=%u day=%u month=%u headerMismatch=%u corruptHeader=%u corruptCrc=%u incompleteFinal=%u truncateFinal=%u smallBuffer=%u cleanup=%u",
             result.fiveMinuteOk,
             result.dayOk,
             result.monthOk,
@@ -291,6 +322,7 @@ bool EnergyHistoryClass::runManualPersistenceProbe(ManualProbeResult& result)
             result.corruptHeaderOk,
             result.corruptCrcOk,
             result.incompleteFinalBlockOk,
+            result.truncateFinalBlockOk,
             result.smallBufferOk,
             result.cleanupOk);
 
@@ -301,6 +333,7 @@ bool EnergyHistoryClass::runManualPersistenceProbe(ManualProbeResult& result)
             && result.corruptHeaderOk
             && result.corruptCrcOk
             && result.incompleteFinalBlockOk
+            && result.truncateFinalBlockOk
             && result.smallBufferOk
             && result.cleanupOk;
 }
