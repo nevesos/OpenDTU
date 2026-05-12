@@ -594,12 +594,15 @@ bool EnergyHistoryClass::scanFile(const char* path, const FileHeader& expectedHe
     }
 
     result.filesScanned++;
+    result.fileSize = file.size();
+    result.lastValidOffset = FileHeaderSize;
 
     while (file.available() > 0) {
-        const size_t remaining = file.size() - file.position();
+        const size_t remaining = result.fileSize - file.position();
         if (remaining < BlockHeaderSize) {
             result.skippedBlocks++;
             result.invalidFinalBlock = true;
+            result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
             break;
         }
 
@@ -607,6 +610,7 @@ bool EnergyHistoryClass::scanFile(const char* path, const FileHeader& expectedHe
         if (!readFull(file, encodedBlockHeader, sizeof(encodedBlockHeader))) {
             result.skippedBlocks++;
             result.invalidFinalBlock = true;
+            result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
             break;
         }
 
@@ -618,13 +622,15 @@ bool EnergyHistoryClass::scanFile(const char* path, const FileHeader& expectedHe
             result.skippedBlocks++;
             if (!skipBytes(file, remaining - BlockHeaderSize)) {
                 result.invalidFinalBlock = true;
+                result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
             }
             break;
         }
 
-        if (file.size() - file.position() < blockHeader.payloadSize) {
+        if (result.fileSize - file.position() < blockHeader.payloadSize) {
             result.skippedBlocks++;
             result.invalidFinalBlock = true;
+            result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
             break;
         }
 
@@ -637,6 +643,7 @@ bool EnergyHistoryClass::scanFile(const char* path, const FileHeader& expectedHe
             if (!readFull(file, buffer, chunkSize)) {
                 result.skippedBlocks++;
                 result.invalidFinalBlock = true;
+                result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
                 return true;
             }
 
@@ -650,6 +657,7 @@ bool EnergyHistoryClass::scanFile(const char* path, const FileHeader& expectedHe
         }
 
         result.validBlocks++;
+        result.lastValidOffset = file.position();
     }
 
     return true;
@@ -670,12 +678,15 @@ bool EnergyHistoryClass::scanFiveMinuteFile(const char* path, const FileHeader& 
     }
 
     result.filesScanned++;
+    result.fileSize = file.size();
+    result.lastValidOffset = FileHeaderSize;
 
     while (file.available() > 0) {
-        const size_t remaining = file.size() - file.position();
+        const size_t remaining = result.fileSize - file.position();
         if (remaining < BlockHeaderSize) {
             result.skippedBlocks++;
             result.invalidFinalBlock = true;
+            result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
             break;
         }
 
@@ -683,6 +694,7 @@ bool EnergyHistoryClass::scanFiveMinuteFile(const char* path, const FileHeader& 
         if (!readFull(file, encodedBlockHeader, sizeof(encodedBlockHeader))) {
             result.skippedBlocks++;
             result.invalidFinalBlock = true;
+            result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
             break;
         }
 
@@ -694,13 +706,15 @@ bool EnergyHistoryClass::scanFiveMinuteFile(const char* path, const FileHeader& 
             result.skippedBlocks++;
             if (!skipBytes(file, remaining - BlockHeaderSize)) {
                 result.invalidFinalBlock = true;
+                result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
             }
             break;
         }
 
-        if (file.size() - file.position() < blockHeader.payloadSize) {
+        if (result.fileSize - file.position() < blockHeader.payloadSize) {
             result.skippedBlocks++;
             result.invalidFinalBlock = true;
+            result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
             break;
         }
 
@@ -713,6 +727,7 @@ bool EnergyHistoryClass::scanFiveMinuteFile(const char* path, const FileHeader& 
             if (!readFull(file, encodedRecord, sizeof(encodedRecord))) {
                 result.skippedBlocks++;
                 result.invalidFinalBlock = true;
+                result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
                 return true;
             }
 
@@ -734,6 +749,7 @@ bool EnergyHistoryClass::scanFiveMinuteFile(const char* path, const FileHeader& 
         result.validBlocks++;
         result.validRecords += validRecordsInBlock;
         result.skippedRecords += skippedRecordsInBlock;
+        result.lastValidOffset = file.position();
     }
 
     return true;

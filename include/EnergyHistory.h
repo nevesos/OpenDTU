@@ -107,7 +107,10 @@ private:
         uint32_t skippedBlocks = 0;
         uint32_t validRecords = 0;
         uint32_t skippedRecords = 0;
+        size_t fileSize = 0;
+        size_t lastValidOffset = 0;
         bool invalidFinalBlock = false;
+        bool canTruncateFinalBlock = false;
     };
 
     void loop();
