@@ -113,6 +113,13 @@ private:
         bool canTruncateFinalBlock = false;
     };
 
+    struct ManualProbeResult {
+        bool writeOk = false;
+        bool readOk = false;
+        uint16_t recordsRead = 0;
+        ScanResult scan;
+    };
+
     void loop();
     bool makeFileHeader(EnergyHistoryFormat::FileType fileType, EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, uint8_t month, EnergyHistoryFormat::FileHeader& header);
     String makeFiveMinutePath(EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, uint8_t month);
@@ -128,6 +135,7 @@ private:
     bool scanFile(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, ScanResult& result);
     bool scanFiveMinuteFile(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, ScanResult& result);
     bool readFiveMinuteFile(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, EnergyHistoryFormat::FiveMinuteRecord* records, uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result);
+    bool runManualFiveMinuteProbe(ManualProbeResult& result);
 
     Task _loopTask;
 };
