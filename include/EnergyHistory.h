@@ -134,6 +134,8 @@ private:
     bool appendMonthBlock(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, const EnergyHistoryFormat::MonthRecord* records, uint16_t recordCount, uint16_t blockIndex);
     bool scanFile(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, ScanResult& result);
     bool scanFiveMinuteFile(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, ScanResult& result);
+    template <typename Record>
+    bool readRecordFile(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, EnergyHistoryFormat::FileType fileType, uint8_t recordSize, Record* records, uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result, bool (*decodeRecord)(const uint8_t*, size_t, Record&), bool (*upsertRecord)(Record*, uint16_t, uint16_t&, const Record&));
     bool readFiveMinuteFile(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, EnergyHistoryFormat::FiveMinuteRecord* records, uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result);
     bool readDayFile(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, EnergyHistoryFormat::DayRecord* records, uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result);
     bool readMonthFile(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, EnergyHistoryFormat::MonthRecord* records, uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result);
