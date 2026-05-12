@@ -128,6 +128,9 @@ private:
     bool writeFiveMinute(EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, uint8_t month, const EnergyHistoryFormat::FiveMinuteRecord* records, uint16_t recordCount, uint16_t blockIndex);
     bool writeDay(EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, const EnergyHistoryFormat::DayRecord* records, uint16_t recordCount, uint16_t blockIndex);
     bool writeMonth(EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, const EnergyHistoryFormat::MonthRecord* records, uint16_t recordCount, uint16_t blockIndex);
+    bool readFiveMinute(EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, uint8_t month, EnergyHistoryFormat::FiveMinuteRecord* records, uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result);
+    bool readDay(EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, EnergyHistoryFormat::DayRecord* records, uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result);
+    bool readMonth(EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, EnergyHistoryFormat::MonthRecord* records, uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result);
     bool appendBlock(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, uint16_t blockIndex, uint16_t startKey, const uint8_t* payload, uint16_t payloadSize, uint16_t recordCount);
     bool appendFiveMinuteBlock(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, const EnergyHistoryFormat::FiveMinuteRecord* records, uint16_t recordCount, uint16_t blockIndex);
     bool appendDayBlock(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, const EnergyHistoryFormat::DayRecord* records, uint16_t recordCount, uint16_t blockIndex);

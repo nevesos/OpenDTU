@@ -720,6 +720,51 @@ bool EnergyHistoryClass::writeMonth(const TargetType targetType, const uint64_t 
     return appendMonthBlock(path.c_str(), header, records, recordCount, blockIndex);
 }
 
+bool EnergyHistoryClass::readFiveMinute(const TargetType targetType, const uint64_t serial, const uint16_t year, const uint8_t month, FiveMinuteRecord* records, const uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result)
+{
+    FileHeader header;
+    if (!makeFileHeader(FileType::FiveMinute, targetType, serial, year, month, header)) {
+        return false;
+    }
+
+    const String path = makeFiveMinutePath(targetType, serial, year, month);
+    if (path.isEmpty()) {
+        return false;
+    }
+
+    return readFiveMinuteFile(path.c_str(), header, records, recordCapacity, recordCount, result);
+}
+
+bool EnergyHistoryClass::readDay(const TargetType targetType, const uint64_t serial, const uint16_t year, DayRecord* records, const uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result)
+{
+    FileHeader header;
+    if (!makeFileHeader(FileType::Day, targetType, serial, year, 0, header)) {
+        return false;
+    }
+
+    const String path = makeDayPath(targetType, serial, year);
+    if (path.isEmpty()) {
+        return false;
+    }
+
+    return readDayFile(path.c_str(), header, records, recordCapacity, recordCount, result);
+}
+
+bool EnergyHistoryClass::readMonth(const TargetType targetType, const uint64_t serial, const uint16_t year, MonthRecord* records, const uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result)
+{
+    FileHeader header;
+    if (!makeFileHeader(FileType::Month, targetType, serial, year, 0, header)) {
+        return false;
+    }
+
+    const String path = makeMonthPath(targetType, serial, year);
+    if (path.isEmpty()) {
+        return false;
+    }
+
+    return readMonthFile(path.c_str(), header, records, recordCapacity, recordCount, result);
+}
+
 bool EnergyHistoryClass::appendBlock(const char* path, const FileHeader& expectedHeader, const uint16_t blockIndex, const uint16_t startKey, const uint8_t* payload, const uint16_t payloadSize, const uint16_t recordCount)
 {
     if (path == nullptr
