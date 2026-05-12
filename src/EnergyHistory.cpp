@@ -523,6 +523,50 @@ bool upsertFiveMinuteRecord(FiveMinuteRecord* records, const uint16_t recordCapa
     return true;
 }
 
+bool upsertDayRecord(DayRecord* records, const uint16_t recordCapacity, uint16_t& recordCount, const DayRecord& record)
+{
+    if (records == nullptr || recordCapacity == 0) {
+        return true;
+    }
+
+    for (uint16_t i = 0; i < recordCount; i++) {
+        if (records[i].dayOfYear == record.dayOfYear) {
+            records[i] = record;
+            return true;
+        }
+    }
+
+    if (recordCount >= recordCapacity) {
+        return false;
+    }
+
+    records[recordCount] = record;
+    recordCount++;
+    return true;
+}
+
+bool upsertMonthRecord(MonthRecord* records, const uint16_t recordCapacity, uint16_t& recordCount, const MonthRecord& record)
+{
+    if (records == nullptr || recordCapacity == 0) {
+        return true;
+    }
+
+    for (uint16_t i = 0; i < recordCount; i++) {
+        if (records[i].month == record.month) {
+            records[i] = record;
+            return true;
+        }
+    }
+
+    if (recordCount >= recordCapacity) {
+        return false;
+    }
+
+    records[recordCount] = record;
+    recordCount++;
+    return true;
+}
+
 bool formatTargetName(char* output, const size_t outputSize, const TargetType targetType, const uint64_t serial)
 {
     if (output == nullptr || outputSize == 0) {
@@ -970,6 +1014,236 @@ bool EnergyHistoryClass::readFiveMinuteFile(const char* path, const FileHeader& 
 
             result.validRecords++;
             if (!upsertFiveMinuteRecord(records, recordCapacity, recordCount, record)) {
+                result.skippedRecords++;
+            }
+        }
+
+        result.validBlocks++;
+        result.lastValidOffset = file.position();
+    }
+
+    return true;
+}
+
+bool EnergyHistoryClass::readDayFile(const char* path, const FileHeader& expectedHeader, DayRecord* records, const uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result)
+{
+    if (path == nullptr
+            || expectedHeader.fileType != static_cast<uint8_t>(FileType::Day)
+            || expectedHeader.recordSize != DayRecordSize
+            || !LittleFS.exists(path)) {
+        return false;
+    }
+
+    recordCount = 0;
+
+    File file = LittleFS.open(path, "r", false);
+    if (!file || file.size() < FileHeaderSize || !readValidatedFileHeader(file, expectedHeader)) {
+        return false;
+    }
+
+    result.filesScanned++;
+    result.fileSize = file.size();
+    result.lastValidOffset = FileHeaderSize;
+
+    while (file.available() > 0) {
+        const size_t remaining = result.fileSize - file.position();
+        if (remaining < BlockHeaderSize) {
+            result.skippedBlocks++;
+            result.invalidFinalBlock = true;
+            result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
+            break;
+        }
+
+        uint8_t encodedBlockHeader[BlockHeaderSize];
+        if (!readFull(file, encodedBlockHeader, sizeof(encodedBlockHeader))) {
+            result.skippedBlocks++;
+            result.invalidFinalBlock = true;
+            result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
+            break;
+        }
+
+        BlockHeader blockHeader;
+        if (!decodeBlockHeader(encodedBlockHeader, sizeof(encodedBlockHeader), blockHeader)
+                || blockHeader.recordCount == 0
+                || blockHeader.payloadSize == 0
+                || blockHeader.payloadSize != blockHeader.recordCount * DayRecordSize) {
+            result.skippedBlocks++;
+            if (!skipBytes(file, remaining - BlockHeaderSize)) {
+                result.invalidFinalBlock = true;
+                result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
+            }
+            break;
+        }
+
+        if (result.fileSize - file.position() < blockHeader.payloadSize) {
+            result.skippedBlocks++;
+            result.invalidFinalBlock = true;
+            result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
+            break;
+        }
+
+        const size_t payloadStart = file.position();
+        uint32_t crc = 0xffffffff;
+        uint16_t bytesRemaining = blockHeader.payloadSize;
+        uint8_t buffer[FileReadBufferSize];
+
+        while (bytesRemaining > 0) {
+            const size_t chunkSize = bytesRemaining < sizeof(buffer) ? bytesRemaining : sizeof(buffer);
+            if (!readFull(file, buffer, chunkSize)) {
+                result.skippedBlocks++;
+                result.invalidFinalBlock = true;
+                result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
+                return true;
+            }
+
+            crc = updateCrc32(crc, buffer, chunkSize);
+            bytesRemaining -= chunkSize;
+        }
+
+        if (blockHeader.crc32Payload != finalizeCrc32(crc)) {
+            result.skippedBlocks++;
+            continue;
+        }
+
+        if (!file.seek(payloadStart)) {
+            result.skippedBlocks++;
+            result.invalidFinalBlock = true;
+            result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
+            return true;
+        }
+
+        for (uint16_t i = 0; i < blockHeader.recordCount; i++) {
+            uint8_t encodedRecord[DayRecordSize];
+            if (!readFull(file, encodedRecord, sizeof(encodedRecord))) {
+                result.skippedBlocks++;
+                result.invalidFinalBlock = true;
+                result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
+                return true;
+            }
+
+            DayRecord record;
+            if (!decodeDayRecord(encodedRecord, sizeof(encodedRecord), record)) {
+                result.skippedRecords++;
+                continue;
+            }
+
+            result.validRecords++;
+            if (!upsertDayRecord(records, recordCapacity, recordCount, record)) {
+                result.skippedRecords++;
+            }
+        }
+
+        result.validBlocks++;
+        result.lastValidOffset = file.position();
+    }
+
+    return true;
+}
+
+bool EnergyHistoryClass::readMonthFile(const char* path, const FileHeader& expectedHeader, MonthRecord* records, const uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result)
+{
+    if (path == nullptr
+            || expectedHeader.fileType != static_cast<uint8_t>(FileType::Month)
+            || expectedHeader.recordSize != MonthRecordSize
+            || !LittleFS.exists(path)) {
+        return false;
+    }
+
+    recordCount = 0;
+
+    File file = LittleFS.open(path, "r", false);
+    if (!file || file.size() < FileHeaderSize || !readValidatedFileHeader(file, expectedHeader)) {
+        return false;
+    }
+
+    result.filesScanned++;
+    result.fileSize = file.size();
+    result.lastValidOffset = FileHeaderSize;
+
+    while (file.available() > 0) {
+        const size_t remaining = result.fileSize - file.position();
+        if (remaining < BlockHeaderSize) {
+            result.skippedBlocks++;
+            result.invalidFinalBlock = true;
+            result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
+            break;
+        }
+
+        uint8_t encodedBlockHeader[BlockHeaderSize];
+        if (!readFull(file, encodedBlockHeader, sizeof(encodedBlockHeader))) {
+            result.skippedBlocks++;
+            result.invalidFinalBlock = true;
+            result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
+            break;
+        }
+
+        BlockHeader blockHeader;
+        if (!decodeBlockHeader(encodedBlockHeader, sizeof(encodedBlockHeader), blockHeader)
+                || blockHeader.recordCount == 0
+                || blockHeader.payloadSize == 0
+                || blockHeader.payloadSize != blockHeader.recordCount * MonthRecordSize) {
+            result.skippedBlocks++;
+            if (!skipBytes(file, remaining - BlockHeaderSize)) {
+                result.invalidFinalBlock = true;
+                result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
+            }
+            break;
+        }
+
+        if (result.fileSize - file.position() < blockHeader.payloadSize) {
+            result.skippedBlocks++;
+            result.invalidFinalBlock = true;
+            result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
+            break;
+        }
+
+        const size_t payloadStart = file.position();
+        uint32_t crc = 0xffffffff;
+        uint16_t bytesRemaining = blockHeader.payloadSize;
+        uint8_t buffer[FileReadBufferSize];
+
+        while (bytesRemaining > 0) {
+            const size_t chunkSize = bytesRemaining < sizeof(buffer) ? bytesRemaining : sizeof(buffer);
+            if (!readFull(file, buffer, chunkSize)) {
+                result.skippedBlocks++;
+                result.invalidFinalBlock = true;
+                result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
+                return true;
+            }
+
+            crc = updateCrc32(crc, buffer, chunkSize);
+            bytesRemaining -= chunkSize;
+        }
+
+        if (blockHeader.crc32Payload != finalizeCrc32(crc)) {
+            result.skippedBlocks++;
+            continue;
+        }
+
+        if (!file.seek(payloadStart)) {
+            result.skippedBlocks++;
+            result.invalidFinalBlock = true;
+            result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
+            return true;
+        }
+
+        for (uint16_t i = 0; i < blockHeader.recordCount; i++) {
+            uint8_t encodedRecord[MonthRecordSize];
+            if (!readFull(file, encodedRecord, sizeof(encodedRecord))) {
+                result.skippedBlocks++;
+                result.invalidFinalBlock = true;
+                result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
+                return true;
+            }
+
+            MonthRecord record;
+            if (!decodeMonthRecord(encodedRecord, sizeof(encodedRecord), record)) {
+                result.skippedRecords++;
+                continue;
+            }
+
+            result.validRecords++;
+            if (!upsertMonthRecord(records, recordCapacity, recordCount, record)) {
                 result.skippedRecords++;
             }
         }
