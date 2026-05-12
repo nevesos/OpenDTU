@@ -2,6 +2,7 @@
     <BasePage
         :title="$t('energyhistory.EnergyHistory')"
         :isLoading="dataLoading"
+        :isWideScreen="true"
         :show-reload="true"
         @reload="reloadAll"
     >
