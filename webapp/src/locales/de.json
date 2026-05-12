@@ -741,6 +741,8 @@
         "From": "Von",
         "To": "Bis",
         "Load": "Laden",
+        "Time": "Zeit",
+        "Period": "Zeitraum",
         "Slot": "Slot",
         "DayOfYear": "Tag im Jahr",
         "YieldWh": "Ertrag Wh",

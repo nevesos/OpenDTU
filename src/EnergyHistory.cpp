@@ -1153,6 +1153,7 @@ bool EnergyHistoryClass::scanFile(const char* path, const FileHeader& expectedHe
         }
 
         result.validBlocks++;
+        result.validRecords += blockHeader.recordCount;
         result.lastValidOffset = file.position();
     }
 

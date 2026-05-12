@@ -86,6 +86,33 @@ bool parseDate(const String& date, uint16_t& year, uint8_t& month, uint8_t& day)
     return year >= 2000 && month >= 1 && month <= 12 && day >= 1 && day <= 31;
 }
 
+String formatTargetId(const TargetType targetType, const uint64_t serial)
+{
+    return targetType == TargetType::Total ? String("total") : String("inv_") + String(serial);
+}
+
+uint16_t averagePowerFromDelta(const FiveMinuteRecord* records, const uint16_t recordCount, const uint16_t index)
+{
+    if (records == nullptr || index == 0 || index >= recordCount) {
+        return 0;
+    }
+
+    const FiveMinuteRecord& current = records[index];
+    const FiveMinuteRecord& previous = records[index - 1];
+    if (current.slot <= previous.slot || current.yieldDayWh < previous.yieldDayWh) {
+        return 0;
+    }
+
+    const uint32_t deltaWh = current.yieldDayWh - previous.yieldDayWh;
+    const uint32_t deltaSec = static_cast<uint32_t>(current.slot - previous.slot) * FiveMinuteIntervalSec;
+    if (deltaSec == 0) {
+        return 0;
+    }
+
+    const uint32_t powerW = (deltaWh * 3600U + deltaSec / 2U) / deltaSec;
+    return powerW > UINT16_MAX ? UINT16_MAX : static_cast<uint16_t>(powerW);
+}
+
 void writeScan(JsonObject root, const EnergyHistoryClass::ScanResult& scan)
 {
     root["files_scanned"] = scan.filesScanned;
@@ -167,7 +194,7 @@ void WebApiEnergyHistoryClass::onHistory(AsyncWebServerRequest* request)
     EnergyHistoryClass::ScanResult scan;
     AsyncJsonResponse* response = new AsyncJsonResponse();
     auto& root = response->getRoot();
-    root["target"] = targetType == TargetType::Total ? "total" : String("inv_") + String(serial);
+    root["target"] = formatTargetId(targetType, serial);
     root["resolution"] = resolution;
     JsonArray data = root["data"].to<JsonArray>();
 
@@ -198,12 +225,14 @@ void WebApiEnergyHistoryClass::onHistory(AsyncWebServerRequest* request)
         uint16_t recordCount = 0;
         queryOk = EnergyHistory.queryFiveMinuteDay(targetType, serial, year, month, day, records.get(), FiveMinuteSlotsPerDay, recordCount, scan);
         root["date"] = request->getParam("date")->value();
+        root["interval_sec"] = FiveMinuteIntervalSec;
 
         for (uint16_t i = 0; queryOk && i < recordCount; i++) {
             JsonObject item = data.add<JsonObject>();
             item["day"] = records[i].day;
             item["slot"] = records[i].slot;
             item["yield_wh"] = records[i].yieldDayWh;
+            item["avg_power_w"] = averagePowerFromDelta(records.get(), recordCount, i);
             item["flags"] = records[i].flags;
         }
     } else if (resolution == "day") {

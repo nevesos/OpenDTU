@@ -742,6 +742,8 @@
         "From": "From",
         "To": "To",
         "Load": "Load",
+        "Time": "Time",
+        "Period": "Period",
         "Slot": "Slot",
         "DayOfYear": "Day of year",
         "YieldWh": "Yield Wh",

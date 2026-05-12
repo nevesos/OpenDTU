@@ -728,6 +728,8 @@
         "From": "De",
         "To": "A",
         "Load": "Charger",
+        "Time": "Heure",
+        "Period": "Periode",
         "Slot": "Creneau",
         "DayOfYear": "Jour de l'annee",
         "YieldWh": "Production Wh",

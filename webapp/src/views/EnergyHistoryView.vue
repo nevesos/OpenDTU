@@ -86,7 +86,7 @@
                         <tr>
                             <th>{{ firstColumnLabel }}</th>
                             <th>{{ $t('energyhistory.YieldWh') }}</th>
-                            <th v-if="query.resolution === '5m'">{{ $t('energyhistory.Flags') }}</th>
+                            <th v-if="query.resolution === '5m'">{{ $t('energyhistory.AvgPowerW') }}</th>
                             <th v-if="query.resolution !== '5m'">{{ $t('energyhistory.MaxPowerW') }}</th>
                             <th v-if="query.resolution !== '5m'">{{ $t('energyhistory.AvgPowerW') }}</th>
                             <th v-if="query.resolution !== '5m'">{{ $t('energyhistory.RuntimeMin') }}</th>
@@ -99,7 +99,7 @@
                         <tr v-for="(row, index) in history.data" :key="index">
                             <td>{{ firstColumnValue(row) }}</td>
                             <td>{{ $n(row.yield_wh || 0) }}</td>
-                            <td v-if="query.resolution === '5m'">{{ row.flags }}</td>
+                            <td v-if="query.resolution === '5m'">{{ $n(row.avg_power_w || 0) }}</td>
                             <td v-if="query.resolution !== '5m'">{{ $n(row.max_power_w || 0) }}</td>
                             <td v-if="query.resolution !== '5m'">{{ $n(row.avg_power_w || 0) }}</td>
                             <td v-if="query.resolution !== '5m'">{{ $n(row.runtime_min || 0) }}</td>
@@ -190,12 +190,12 @@ export default defineComponent({
     computed: {
         firstColumnLabel(): string {
             if (this.query.resolution === '5m') {
-                return this.$t('energyhistory.Slot');
+                return this.$t('energyhistory.Time');
             }
             if (this.query.resolution === 'day') {
-                return this.$t('energyhistory.DayOfYear');
+                return this.$t('energyhistory.Date');
             }
-            return this.$t('energyhistory.Month');
+            return this.$t('energyhistory.Period');
         },
     },
     created() {
@@ -242,12 +242,25 @@ export default defineComponent({
         },
         firstColumnValue(row: EnergyHistoryRow): string | number {
             if (this.query.resolution === '5m') {
-                return row.slot ?? '';
+                return row.slot !== undefined ? this.formatSlotTime(row.slot) : '';
             }
             if (this.query.resolution === 'day') {
-                return row.day_of_year ?? '';
+                return row.day_of_year !== undefined ? this.formatDayOfYear(this.query.year, row.day_of_year) : '';
             }
-            return row.month ?? '';
+            return row.month !== undefined ? this.formatMonth(this.query.year, row.month) : '';
+        },
+        formatSlotTime(slot: number): string {
+            const minutes = slot * 5;
+            const hours = Math.floor(minutes / 60);
+            const minute = minutes % 60;
+            return `${String(hours).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+        },
+        formatDayOfYear(year: number, dayOfYear: number): string {
+            const date = new Date(Date.UTC(year, 0, dayOfYear));
+            return date.toISOString().slice(0, 10);
+        },
+        formatMonth(year: number, month: number): string {
+            return `${year}-${String(month).padStart(2, '0')}`;
         },
         formatBytes(value: number): string {
             if (value < 1024) {
