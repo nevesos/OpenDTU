@@ -117,6 +117,11 @@ private:
         bool fiveMinuteOk = false;
         bool dayOk = false;
         bool monthOk = false;
+        bool headerMismatchOk = false;
+        bool corruptHeaderOk = false;
+        bool corruptCrcOk = false;
+        bool incompleteFinalBlockOk = false;
+        bool smallBufferOk = false;
         bool cleanupOk = false;
         uint16_t fiveMinuteRecordsRead = 0;
         uint16_t dayRecordsRead = 0;
@@ -124,6 +129,9 @@ private:
         ScanResult fiveMinuteScan;
         ScanResult dayScan;
         ScanResult monthScan;
+        ScanResult corruptCrcScan;
+        ScanResult incompleteFinalBlockScan;
+        ScanResult smallBufferScan;
     };
 
     void loop();

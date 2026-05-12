@@ -450,7 +450,7 @@ bool ensureFileHeader(const char* path, const FileHeader& expectedHeader)
         return false;
     }
 
-    File appendFile = LittleFS.open(path, "a", true);
+    File appendFile = LittleFS.open(path, "a");
     if (!appendFile) {
         return false;
     }
@@ -615,10 +615,15 @@ void EnergyHistoryClass::init(Scheduler& scheduler)
     if (probeOk) {
         ESP_LOGI(
                 EnergyHistoryTag,
-                "Manual persistence probe ok: 5m=%u day=%u month=%u cleanup=%u records=%u/%u/%u blocks=%" PRIu32 "/%" PRIu32 "/%" PRIu32,
+                "Manual persistence probe ok: 5m=%u day=%u month=%u headerMismatch=%u corruptHeader=%u corruptCrc=%u incompleteFinal=%u smallBuffer=%u cleanup=%u records=%u/%u/%u blocks=%" PRIu32 "/%" PRIu32 "/%" PRIu32,
                 probe.fiveMinuteOk,
                 probe.dayOk,
                 probe.monthOk,
+                probe.headerMismatchOk,
+                probe.corruptHeaderOk,
+                probe.corruptCrcOk,
+                probe.incompleteFinalBlockOk,
+                probe.smallBufferOk,
                 probe.cleanupOk,
                 probe.fiveMinuteRecordsRead,
                 probe.dayRecordsRead,
@@ -629,10 +634,15 @@ void EnergyHistoryClass::init(Scheduler& scheduler)
     } else {
         ESP_LOGE(
                 EnergyHistoryTag,
-                "Manual persistence probe failed: 5m=%u day=%u month=%u cleanup=%u records=%u/%u/%u blocks=%" PRIu32 "/%" PRIu32 "/%" PRIu32,
+                "Manual persistence probe failed: 5m=%u day=%u month=%u headerMismatch=%u corruptHeader=%u corruptCrc=%u incompleteFinal=%u smallBuffer=%u cleanup=%u records=%u/%u/%u blocks=%" PRIu32 "/%" PRIu32 "/%" PRIu32,
                 probe.fiveMinuteOk,
                 probe.dayOk,
                 probe.monthOk,
+                probe.headerMismatchOk,
+                probe.corruptHeaderOk,
+                probe.corruptCrcOk,
+                probe.incompleteFinalBlockOk,
+                probe.smallBufferOk,
                 probe.cleanupOk,
                 probe.fiveMinuteRecordsRead,
                 probe.dayRecordsRead,
@@ -914,7 +924,7 @@ bool EnergyHistoryClass::appendMonthBlock(const char* path, const FileHeader& ex
 
 bool EnergyHistoryClass::scanFile(const char* path, const FileHeader& expectedHeader, ScanResult& result)
 {
-    if (path == nullptr || !LittleFS.exists(path)) {
+    if (path == nullptr) {
         return false;
     }
 
@@ -1006,8 +1016,7 @@ bool EnergyHistoryClass::readRecordFile(const char* path, const FileHeader& expe
             || expectedHeader.fileType != static_cast<uint8_t>(fileType)
             || expectedHeader.recordSize != recordSize
             || decodeRecord == nullptr
-            || upsertRecord == nullptr
-            || !LittleFS.exists(path)) {
+            || upsertRecord == nullptr) {
         return false;
     }
 
