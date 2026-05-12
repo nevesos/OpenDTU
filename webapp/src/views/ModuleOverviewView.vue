@@ -1667,6 +1667,10 @@ export default defineComponent({
 }
 
 .module-overview-select {
+    min-height: calc(1.5em + 0.75rem + 2px);
+    padding-top: 0.375rem;
+    padding-bottom: 0.375rem;
+    font-size: 1rem;
     width: auto;
 }
 
@@ -1676,6 +1680,7 @@ export default defineComponent({
     align-items: center;
     gap: 0.5rem;
     min-width: 16rem;
+    min-height: calc(1.5em + 0.75rem + 2px);
     max-width: 100%;
     padding: 0.25rem 0.5rem;
     border: 1px solid var(--bs-border-color);
@@ -1685,9 +1690,10 @@ export default defineComponent({
 
 .module-overview-heatmap-gradient {
     flex: 0 0 5.5rem;
-    height: 0.75rem;
+    align-self: stretch;
+    min-height: 1.25rem;
     border: 1px solid var(--bs-border-color-translucent);
-    border-radius: 999px;
+    border-radius: calc(var(--bs-border-radius) * 0.75);
     background: linear-gradient(90deg, hsl(210deg 85% 88%), hsl(135deg 85% 80%), hsl(60deg 85% 72%));
 }
 
@@ -1818,7 +1824,15 @@ export default defineComponent({
     }
 
     .module-overview-select {
+        min-height: calc(1.5em + 0.4rem + 2px);
         max-width: 9.5rem;
+        padding-top: 0.2rem;
+        padding-bottom: 0.2rem;
+        font-size: 0.82rem;
+    }
+
+    .module-overview-heatmap-legend {
+        min-height: calc(1.5em + 0.4rem + 2px);
         padding-top: 0.2rem;
         padding-bottom: 0.2rem;
         font-size: 0.82rem;
