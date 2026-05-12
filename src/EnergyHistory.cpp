@@ -450,7 +450,7 @@ bool ensureFileHeader(const char* path, const FileHeader& expectedHeader)
         return false;
     }
 
-    File appendFile = LittleFS.open(path, "a");
+    File appendFile = LittleFS.open(path, "a", true);
     if (!appendFile) {
         return false;
     }
@@ -609,6 +609,7 @@ EnergyHistoryClass::EnergyHistoryClass()
 void EnergyHistoryClass::init(Scheduler& scheduler)
 {
 #if defined(ENERGY_HISTORY_MANUAL_PROBE)
+    esp_log_level_set(EnergyHistoryTag, ESP_LOG_VERBOSE);
     ManualProbeResult probe;
     const bool probeOk = runManualPersistenceProbe(probe);
     if (probeOk) {

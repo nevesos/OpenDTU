@@ -24,6 +24,22 @@ bool verifyScan(const Scan& scan, const uint32_t validRecords)
             && !scan.canTruncateFinalBlock;
 }
 
+bool truncateProbeFile(const String& path)
+{
+    File file = LittleFS.open(path, "w", true);
+    return file;
+}
+
+bool ensureProbeDirectory(const char* path)
+{
+    if (LittleFS.mkdir(path)) {
+        return true;
+    }
+
+    File directory = LittleFS.open(path, "r", false);
+    return directory && directory.isDirectory();
+}
+
 } // namespace
 
 bool EnergyHistoryClass::runManualPersistenceProbe(ManualProbeResult& result)
@@ -36,10 +52,6 @@ bool EnergyHistoryClass::runManualPersistenceProbe(ManualProbeResult& result)
     if (fiveMinutePath.isEmpty() || dayPath.isEmpty() || monthPath.isEmpty()) {
         return false;
     }
-
-    LittleFS.remove(fiveMinutePath);
-    LittleFS.remove(dayPath);
-    LittleFS.remove(monthPath);
 
     const FiveMinuteRecord firstFiveMinuteBlock[] = {
         { 1, 0, 10, RecordFlagValid },
@@ -62,6 +74,20 @@ bool EnergyHistoryClass::runManualPersistenceProbe(ManualProbeResult& result)
     const MonthRecord secondMonthBlock[] = {
         { 2, 0, 2500, 120, 60, 450, 4, RecordFlagValid | RecordFlagEstimated },
     };
+
+    const bool cleanupBeforeWriteOk = ensureProbeDirectory("/energy")
+            && ensureProbeDirectory("/energy/5m")
+            && ensureProbeDirectory("/energy/day")
+            && ensureProbeDirectory("/energy/month")
+            && truncateProbeFile(fiveMinutePath)
+            && truncateProbeFile(dayPath)
+            && truncateProbeFile(monthPath);
+    if (!cleanupBeforeWriteOk) {
+        LittleFS.remove(fiveMinutePath);
+        LittleFS.remove(dayPath);
+        LittleFS.remove(monthPath);
+        return false;
+    }
 
     const bool fiveMinuteWriteOk = writeFiveMinute(TargetType::Inverter, ManualProbeSerial, ManualProbeYear, ManualProbeMonth, firstFiveMinuteBlock, 2, 0)
             && writeFiveMinute(TargetType::Inverter, ManualProbeSerial, ManualProbeYear, ManualProbeMonth, secondFiveMinuteBlock, 1, 1);
