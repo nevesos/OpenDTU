@@ -4,6 +4,9 @@
  */
 #include "EnergyHistory.h"
 #include <LittleFS.h>
+#if defined(ENERGY_HISTORY_MANUAL_PROBE)
+#include <esp_log.h>
+#endif
 #include <cstdio>
 #include <cstring>
 #include <inttypes.h>
@@ -24,6 +27,9 @@ static constexpr const char* DayDirectory = "/energy/day";
 static constexpr const char* MonthDirectory = "/energy/month";
 static constexpr size_t FileReadBufferSize = 32;
 static constexpr uint16_t MaxRecordsPerAppendBlock = 4;
+#if defined(ENERGY_HISTORY_MANUAL_PROBE)
+static constexpr const char* TAG = "EnergyHistory";
+#endif
 
 [[maybe_unused]] void writeUint8(uint8_t* output, const uint8_t value)
 {
@@ -599,6 +605,26 @@ EnergyHistoryClass::EnergyHistoryClass()
 
 void EnergyHistoryClass::init(Scheduler& scheduler)
 {
+#if defined(ENERGY_HISTORY_MANUAL_PROBE)
+    ManualProbeResult probe;
+    const bool probeOk = runManualPersistenceProbe(probe);
+    ESP_LOG_LEVEL_LOCAL(
+            probeOk ? ESP_LOG_INFO : ESP_LOG_ERROR,
+            TAG,
+            "Manual persistence probe %s: 5m=%u day=%u month=%u cleanup=%u records=%u/%u/%u blocks=%" PRIu32 "/%" PRIu32 "/%" PRIu32,
+            probeOk ? "ok" : "failed",
+            probe.fiveMinuteOk,
+            probe.dayOk,
+            probe.monthOk,
+            probe.cleanupOk,
+            probe.fiveMinuteRecordsRead,
+            probe.dayRecordsRead,
+            probe.monthRecordsRead,
+            probe.fiveMinuteScan.validBlocks,
+            probe.dayScan.validBlocks,
+            probe.monthScan.validBlocks);
+#endif
+
     scheduler.addTask(_loopTask);
     _loopTask.enable();
 }

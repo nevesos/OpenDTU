@@ -114,10 +114,16 @@ private:
     };
 
     struct ManualProbeResult {
-        bool writeOk = false;
-        bool readOk = false;
-        uint16_t recordsRead = 0;
-        ScanResult scan;
+        bool fiveMinuteOk = false;
+        bool dayOk = false;
+        bool monthOk = false;
+        bool cleanupOk = false;
+        uint16_t fiveMinuteRecordsRead = 0;
+        uint16_t dayRecordsRead = 0;
+        uint16_t monthRecordsRead = 0;
+        ScanResult fiveMinuteScan;
+        ScanResult dayScan;
+        ScanResult monthScan;
     };
 
     void loop();
@@ -142,7 +148,7 @@ private:
     bool readFiveMinuteFile(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, EnergyHistoryFormat::FiveMinuteRecord* records, uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result);
     bool readDayFile(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, EnergyHistoryFormat::DayRecord* records, uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result);
     bool readMonthFile(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, EnergyHistoryFormat::MonthRecord* records, uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result);
-    bool runManualFiveMinuteProbe(ManualProbeResult& result);
+    bool runManualPersistenceProbe(ManualProbeResult& result);
 
     Task _loopTask;
 };
