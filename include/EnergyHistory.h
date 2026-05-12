@@ -101,9 +101,20 @@ public:
     void init(Scheduler& scheduler);
 
 private:
+    struct ScanResult {
+        uint32_t filesScanned = 0;
+        uint32_t validBlocks = 0;
+        uint32_t skippedBlocks = 0;
+        uint32_t validRecords = 0;
+        uint32_t skippedRecords = 0;
+        bool invalidFinalBlock = false;
+    };
+
     void loop();
     bool appendBlock(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, uint16_t blockIndex, uint16_t startKey, const uint8_t* payload, uint16_t payloadSize, uint16_t recordCount);
     bool appendFiveMinuteBlock(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, const EnergyHistoryFormat::FiveMinuteRecord* records, uint16_t recordCount, uint16_t blockIndex);
+    bool scanFile(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, ScanResult& result);
+    bool scanFiveMinuteFile(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, ScanResult& result);
 
     Task _loopTask;
 };

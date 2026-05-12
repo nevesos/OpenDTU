@@ -20,6 +20,7 @@ static constexpr const char* EnergyDirectory = "/energy";
 static constexpr const char* FiveMinuteDirectory = "/energy/5m";
 static constexpr const char* DayDirectory = "/energy/day";
 static constexpr const char* MonthDirectory = "/energy/month";
+static constexpr size_t FileReadBufferSize = 32;
 
 [[maybe_unused]] void writeUint8(uint8_t* output, const uint8_t value)
 {
@@ -87,6 +88,28 @@ static constexpr const char* MonthDirectory = "/energy/month";
         }
     }
 
+    return ~crc;
+}
+
+uint32_t updateCrc32(uint32_t crc, const uint8_t* data, const size_t length)
+{
+    for (size_t i = 0; i < length; i++) {
+        crc ^= data[i];
+
+        for (uint8_t bit = 0; bit < 8; bit++) {
+            if ((crc & 1) != 0) {
+                crc = (crc >> 1) ^ 0xedb88320;
+            } else {
+                crc >>= 1;
+            }
+        }
+    }
+
+    return crc;
+}
+
+uint32_t finalizeCrc32(const uint32_t crc)
+{
     return ~crc;
 }
 
@@ -441,6 +464,40 @@ bool ensureFileHeader(const char* path, const FileHeader& expectedHeader)
             && headersMatch(decodedHeader, expectedHeader);
 }
 
+bool readFull(File& file, uint8_t* data, const size_t length)
+{
+    return file.read(data, length) == length;
+}
+
+bool readValidatedFileHeader(File& file, const FileHeader& expectedHeader)
+{
+    uint8_t encodedHeader[FileHeaderSize];
+    if (!readFull(file, encodedHeader, sizeof(encodedHeader))) {
+        return false;
+    }
+
+    FileHeader decodedHeader;
+    return decodeFileHeader(encodedHeader, sizeof(encodedHeader), decodedHeader)
+            && headersMatch(decodedHeader, expectedHeader);
+}
+
+bool skipBytes(File& file, const size_t length)
+{
+    uint8_t buffer[FileReadBufferSize];
+    size_t remaining = length;
+
+    while (remaining > 0) {
+        const size_t chunkSize = remaining < sizeof(buffer) ? remaining : sizeof(buffer);
+        if (!readFull(file, buffer, chunkSize)) {
+            return false;
+        }
+
+        remaining -= chunkSize;
+    }
+
+    return true;
+}
+
 } // namespace
 
 EnergyHistoryClass EnergyHistory;
@@ -523,4 +580,161 @@ bool EnergyHistoryClass::appendFiveMinuteBlock(const char* path, const FileHeade
     }
 
     return appendBlock(path, expectedHeader, blockIndex, records[0].day, payload, recordCount * FiveMinuteRecordSize, recordCount);
+}
+
+bool EnergyHistoryClass::scanFile(const char* path, const FileHeader& expectedHeader, ScanResult& result)
+{
+    if (path == nullptr || !LittleFS.exists(path)) {
+        return false;
+    }
+
+    File file = LittleFS.open(path, "r", false);
+    if (!file || file.size() < FileHeaderSize || !readValidatedFileHeader(file, expectedHeader)) {
+        return false;
+    }
+
+    result.filesScanned++;
+
+    while (file.available() > 0) {
+        const size_t remaining = file.size() - file.position();
+        if (remaining < BlockHeaderSize) {
+            result.skippedBlocks++;
+            result.invalidFinalBlock = true;
+            break;
+        }
+
+        uint8_t encodedBlockHeader[BlockHeaderSize];
+        if (!readFull(file, encodedBlockHeader, sizeof(encodedBlockHeader))) {
+            result.skippedBlocks++;
+            result.invalidFinalBlock = true;
+            break;
+        }
+
+        BlockHeader blockHeader;
+        if (!decodeBlockHeader(encodedBlockHeader, sizeof(encodedBlockHeader), blockHeader)
+                || blockHeader.recordCount == 0
+                || blockHeader.payloadSize == 0
+                || blockHeader.payloadSize != blockHeader.recordCount * expectedHeader.recordSize) {
+            result.skippedBlocks++;
+            if (!skipBytes(file, remaining - BlockHeaderSize)) {
+                result.invalidFinalBlock = true;
+            }
+            break;
+        }
+
+        if (file.size() - file.position() < blockHeader.payloadSize) {
+            result.skippedBlocks++;
+            result.invalidFinalBlock = true;
+            break;
+        }
+
+        uint32_t crc = 0xffffffff;
+        uint8_t buffer[FileReadBufferSize];
+        uint16_t bytesRemaining = blockHeader.payloadSize;
+
+        while (bytesRemaining > 0) {
+            const size_t chunkSize = bytesRemaining < sizeof(buffer) ? bytesRemaining : sizeof(buffer);
+            if (!readFull(file, buffer, chunkSize)) {
+                result.skippedBlocks++;
+                result.invalidFinalBlock = true;
+                return true;
+            }
+
+            crc = updateCrc32(crc, buffer, chunkSize);
+            bytesRemaining -= chunkSize;
+        }
+
+        if (blockHeader.crc32Payload != finalizeCrc32(crc)) {
+            result.skippedBlocks++;
+            continue;
+        }
+
+        result.validBlocks++;
+    }
+
+    return true;
+}
+
+bool EnergyHistoryClass::scanFiveMinuteFile(const char* path, const FileHeader& expectedHeader, ScanResult& result)
+{
+    if (path == nullptr
+            || expectedHeader.fileType != static_cast<uint8_t>(FileType::FiveMinute)
+            || expectedHeader.recordSize != FiveMinuteRecordSize
+            || !LittleFS.exists(path)) {
+        return false;
+    }
+
+    File file = LittleFS.open(path, "r", false);
+    if (!file || file.size() < FileHeaderSize || !readValidatedFileHeader(file, expectedHeader)) {
+        return false;
+    }
+
+    result.filesScanned++;
+
+    while (file.available() > 0) {
+        const size_t remaining = file.size() - file.position();
+        if (remaining < BlockHeaderSize) {
+            result.skippedBlocks++;
+            result.invalidFinalBlock = true;
+            break;
+        }
+
+        uint8_t encodedBlockHeader[BlockHeaderSize];
+        if (!readFull(file, encodedBlockHeader, sizeof(encodedBlockHeader))) {
+            result.skippedBlocks++;
+            result.invalidFinalBlock = true;
+            break;
+        }
+
+        BlockHeader blockHeader;
+        if (!decodeBlockHeader(encodedBlockHeader, sizeof(encodedBlockHeader), blockHeader)
+                || blockHeader.recordCount == 0
+                || blockHeader.payloadSize == 0
+                || blockHeader.payloadSize != blockHeader.recordCount * FiveMinuteRecordSize) {
+            result.skippedBlocks++;
+            if (!skipBytes(file, remaining - BlockHeaderSize)) {
+                result.invalidFinalBlock = true;
+            }
+            break;
+        }
+
+        if (file.size() - file.position() < blockHeader.payloadSize) {
+            result.skippedBlocks++;
+            result.invalidFinalBlock = true;
+            break;
+        }
+
+        uint32_t crc = 0xffffffff;
+        uint16_t validRecordsInBlock = 0;
+        uint16_t skippedRecordsInBlock = 0;
+
+        for (uint16_t i = 0; i < blockHeader.recordCount; i++) {
+            uint8_t encodedRecord[FiveMinuteRecordSize];
+            if (!readFull(file, encodedRecord, sizeof(encodedRecord))) {
+                result.skippedBlocks++;
+                result.invalidFinalBlock = true;
+                return true;
+            }
+
+            crc = updateCrc32(crc, encodedRecord, sizeof(encodedRecord));
+
+            FiveMinuteRecord record;
+            if (decodeFiveMinuteRecord(encodedRecord, sizeof(encodedRecord), record)) {
+                validRecordsInBlock++;
+            } else {
+                skippedRecordsInBlock++;
+            }
+        }
+
+        if (blockHeader.crc32Payload != finalizeCrc32(crc)) {
+            result.skippedBlocks++;
+            continue;
+        }
+
+        result.validBlocks++;
+        result.validRecords += validRecordsInBlock;
+        result.skippedRecords += skippedRecordsInBlock;
+    }
+
+    return true;
 }
