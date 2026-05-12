@@ -28,7 +28,7 @@ static constexpr const char* MonthDirectory = "/energy/month";
 static constexpr size_t FileReadBufferSize = 32;
 static constexpr uint16_t MaxRecordsPerAppendBlock = 4;
 #if defined(ENERGY_HISTORY_MANUAL_PROBE)
-static constexpr const char* TAG = "EnergyHistory";
+static constexpr const char* EnergyHistoryTag = "EnergyHistory";
 #endif
 
 [[maybe_unused]] void writeUint8(uint8_t* output, const uint8_t value)
@@ -407,11 +407,12 @@ const char* directoryForFileType(const uint8_t fileType)
 
 bool ensureDirectory(const char* path)
 {
-    if (LittleFS.exists(path)) {
+    if (LittleFS.mkdir(path)) {
         return true;
     }
 
-    return LittleFS.mkdir(path);
+    File directory = LittleFS.open(path, "r", false);
+    return directory && directory.isDirectory();
 }
 
 bool ensureEnergyDirectories(const uint8_t fileType)
@@ -449,17 +450,19 @@ bool ensureFileHeader(const char* path, const FileHeader& expectedHeader)
         return false;
     }
 
-    if (!LittleFS.exists(path)) {
-        File file = LittleFS.open(path, "w");
-        if (!file) {
-            return false;
-        }
-
-        return writeFull(file, encodedHeader, sizeof(encodedHeader));
+    File appendFile = LittleFS.open(path, "a");
+    if (!appendFile) {
+        return false;
     }
 
+    const size_t fileSize = appendFile.size();
+    if (fileSize == 0) {
+        return writeFull(appendFile, encodedHeader, sizeof(encodedHeader));
+    }
+
+    appendFile.close();
     File file = LittleFS.open(path, "r", false);
-    if (!file || file.size() < FileHeaderSize) {
+    if (!file || fileSize < FileHeaderSize) {
         return false;
     }
 
@@ -608,21 +611,35 @@ void EnergyHistoryClass::init(Scheduler& scheduler)
 #if defined(ENERGY_HISTORY_MANUAL_PROBE)
     ManualProbeResult probe;
     const bool probeOk = runManualPersistenceProbe(probe);
-    ESP_LOG_LEVEL_LOCAL(
-            probeOk ? ESP_LOG_INFO : ESP_LOG_ERROR,
-            TAG,
-            "Manual persistence probe %s: 5m=%u day=%u month=%u cleanup=%u records=%u/%u/%u blocks=%" PRIu32 "/%" PRIu32 "/%" PRIu32,
-            probeOk ? "ok" : "failed",
-            probe.fiveMinuteOk,
-            probe.dayOk,
-            probe.monthOk,
-            probe.cleanupOk,
-            probe.fiveMinuteRecordsRead,
-            probe.dayRecordsRead,
-            probe.monthRecordsRead,
-            probe.fiveMinuteScan.validBlocks,
-            probe.dayScan.validBlocks,
-            probe.monthScan.validBlocks);
+    if (probeOk) {
+        ESP_LOGI(
+                EnergyHistoryTag,
+                "Manual persistence probe ok: 5m=%u day=%u month=%u cleanup=%u records=%u/%u/%u blocks=%" PRIu32 "/%" PRIu32 "/%" PRIu32,
+                probe.fiveMinuteOk,
+                probe.dayOk,
+                probe.monthOk,
+                probe.cleanupOk,
+                probe.fiveMinuteRecordsRead,
+                probe.dayRecordsRead,
+                probe.monthRecordsRead,
+                probe.fiveMinuteScan.validBlocks,
+                probe.dayScan.validBlocks,
+                probe.monthScan.validBlocks);
+    } else {
+        ESP_LOGE(
+                EnergyHistoryTag,
+                "Manual persistence probe failed: 5m=%u day=%u month=%u cleanup=%u records=%u/%u/%u blocks=%" PRIu32 "/%" PRIu32 "/%" PRIu32,
+                probe.fiveMinuteOk,
+                probe.dayOk,
+                probe.monthOk,
+                probe.cleanupOk,
+                probe.fiveMinuteRecordsRead,
+                probe.dayRecordsRead,
+                probe.monthRecordsRead,
+                probe.fiveMinuteScan.validBlocks,
+                probe.dayScan.validBlocks,
+                probe.monthScan.validBlocks);
+    }
 #endif
 
     scheduler.addTask(_loopTask);

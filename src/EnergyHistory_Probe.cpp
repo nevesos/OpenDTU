@@ -37,15 +37,9 @@ bool EnergyHistoryClass::runManualPersistenceProbe(ManualProbeResult& result)
         return false;
     }
 
-    if (LittleFS.exists(fiveMinutePath)) {
-        LittleFS.remove(fiveMinutePath);
-    }
-    if (LittleFS.exists(dayPath)) {
-        LittleFS.remove(dayPath);
-    }
-    if (LittleFS.exists(monthPath)) {
-        LittleFS.remove(monthPath);
-    }
+    LittleFS.remove(fiveMinutePath);
+    LittleFS.remove(dayPath);
+    LittleFS.remove(monthPath);
 
     const FiveMinuteRecord firstFiveMinuteBlock[] = {
         { 1, 0, 10, RecordFlagValid },
@@ -113,12 +107,9 @@ bool EnergyHistoryClass::runManualPersistenceProbe(ManualProbeResult& result)
             && monthRecords[1].yieldWh == 2500
             && monthRecords[1].flags == (RecordFlagValid | RecordFlagEstimated);
 
-    LittleFS.remove(fiveMinutePath);
-    LittleFS.remove(dayPath);
-    LittleFS.remove(monthPath);
-    result.cleanupOk = !LittleFS.exists(fiveMinutePath)
-            && !LittleFS.exists(dayPath)
-            && !LittleFS.exists(monthPath);
+    result.cleanupOk = LittleFS.remove(fiveMinutePath)
+            && LittleFS.remove(dayPath)
+            && LittleFS.remove(monthPath);
 
     return result.fiveMinuteOk && result.dayOk && result.monthOk && result.cleanupOk;
 }

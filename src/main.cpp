@@ -5,6 +5,9 @@
 #include "Configuration.h"
 #include "Datastore.h"
 #include "Display_Graphic.h"
+#if defined(ENERGY_HISTORY_MANUAL_PROBE)
+#include "EnergyHistory.h"
+#endif
 #include "I18n.h"
 #include "InverterSettings.h"
 #include "Led_Single.h"
@@ -102,6 +105,11 @@ void setup()
     // Initialize SunPosition
     ESP_LOGI(TAG, "Initializing SunPosition...");
     SunPosition.init(scheduler);
+
+#if defined(ENERGY_HISTORY_MANUAL_PROBE)
+    ESP_LOGI(TAG, "Initializing EnergyHistory probe...");
+    EnergyHistory.init(scheduler);
+#endif
 
     // Initialize MqTT
     ESP_LOGI(TAG, "Initializing MQTT...");
