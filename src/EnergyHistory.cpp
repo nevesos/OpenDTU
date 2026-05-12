@@ -631,6 +631,51 @@ String EnergyHistoryClass::makeMonthPath(const TargetType targetType, const uint
     return String(path);
 }
 
+bool EnergyHistoryClass::writeFiveMinute(const TargetType targetType, const uint64_t serial, const uint16_t year, const uint8_t month, const FiveMinuteRecord* records, const uint16_t recordCount, const uint16_t blockIndex)
+{
+    FileHeader header;
+    if (!makeFileHeader(FileType::FiveMinute, targetType, serial, year, month, header)) {
+        return false;
+    }
+
+    const String path = makeFiveMinutePath(targetType, serial, year, month);
+    if (path.isEmpty()) {
+        return false;
+    }
+
+    return appendFiveMinuteBlock(path.c_str(), header, records, recordCount, blockIndex);
+}
+
+bool EnergyHistoryClass::writeDay(const TargetType targetType, const uint64_t serial, const uint16_t year, const DayRecord* records, const uint16_t recordCount, const uint16_t blockIndex)
+{
+    FileHeader header;
+    if (!makeFileHeader(FileType::Day, targetType, serial, year, 0, header)) {
+        return false;
+    }
+
+    const String path = makeDayPath(targetType, serial, year);
+    if (path.isEmpty()) {
+        return false;
+    }
+
+    return appendDayBlock(path.c_str(), header, records, recordCount, blockIndex);
+}
+
+bool EnergyHistoryClass::writeMonth(const TargetType targetType, const uint64_t serial, const uint16_t year, const MonthRecord* records, const uint16_t recordCount, const uint16_t blockIndex)
+{
+    FileHeader header;
+    if (!makeFileHeader(FileType::Month, targetType, serial, year, 0, header)) {
+        return false;
+    }
+
+    const String path = makeMonthPath(targetType, serial, year);
+    if (path.isEmpty()) {
+        return false;
+    }
+
+    return appendMonthBlock(path.c_str(), header, records, recordCount, blockIndex);
+}
+
 bool EnergyHistoryClass::appendBlock(const char* path, const FileHeader& expectedHeader, const uint16_t blockIndex, const uint16_t startKey, const uint8_t* payload, const uint16_t payloadSize, const uint16_t recordCount)
 {
     if (path == nullptr
