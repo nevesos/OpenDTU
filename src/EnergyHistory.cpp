@@ -3,6 +3,7 @@
  * Copyright (C) 2026 urdev
  */
 #include "EnergyHistory.h"
+#include <LittleFS.h>
 #include <cstring>
 
 namespace {
@@ -15,6 +16,10 @@ static constexpr uint8_t KnownRecordFlagsMask = RecordFlagValid
         | RecordFlagProducing
         | RecordFlagDayResetDetected
         | RecordFlagEstimated;
+static constexpr const char* EnergyDirectory = "/energy";
+static constexpr const char* FiveMinuteDirectory = "/energy/5m";
+static constexpr const char* DayDirectory = "/energy/day";
+static constexpr const char* MonthDirectory = "/energy/month";
 
 [[maybe_unused]] void writeUint8(uint8_t* output, const uint8_t value)
 {
@@ -354,6 +359,88 @@ uint8_t expectedRecordSize(const FileType fileType)
             && (record.flags & ~KnownRecordFlagsMask) == 0;
 }
 
+const char* directoryForFileType(const uint8_t fileType)
+{
+    switch (static_cast<FileType>(fileType)) {
+    case FileType::FiveMinute:
+        return FiveMinuteDirectory;
+    case FileType::Day:
+        return DayDirectory;
+    case FileType::Month:
+        return MonthDirectory;
+    default:
+        return nullptr;
+    }
+}
+
+bool ensureDirectory(const char* path)
+{
+    if (LittleFS.exists(path)) {
+        return true;
+    }
+
+    return LittleFS.mkdir(path);
+}
+
+bool ensureEnergyDirectories(const uint8_t fileType)
+{
+    const char* typeDirectory = directoryForFileType(fileType);
+    if (typeDirectory == nullptr) {
+        return false;
+    }
+
+    return ensureDirectory(EnergyDirectory) && ensureDirectory(typeDirectory);
+}
+
+bool writeFull(File& file, const uint8_t* data, const size_t length)
+{
+    return file.write(data, length) == length;
+}
+
+bool headersMatch(const FileHeader& actual, const FileHeader& expected)
+{
+    return actual.fileType == expected.fileType
+            && actual.version == expected.version
+            && actual.headerSize == expected.headerSize
+            && actual.recordSize == expected.recordSize
+            && actual.year == expected.year
+            && actual.month == expected.month
+            && actual.targetType == expected.targetType
+            && actual.serial == expected.serial
+            && actual.intervalSec == expected.intervalSec;
+}
+
+bool ensureFileHeader(const char* path, const FileHeader& expectedHeader)
+{
+    uint8_t encodedHeader[FileHeaderSize];
+    if (!encodeFileHeader(expectedHeader, encodedHeader, sizeof(encodedHeader))) {
+        return false;
+    }
+
+    if (!LittleFS.exists(path)) {
+        File file = LittleFS.open(path, "w");
+        if (!file) {
+            return false;
+        }
+
+        return writeFull(file, encodedHeader, sizeof(encodedHeader));
+    }
+
+    File file = LittleFS.open(path, "r", false);
+    if (!file || file.size() < FileHeaderSize) {
+        return false;
+    }
+
+    uint8_t existingHeader[FileHeaderSize];
+    if (file.read(existingHeader, sizeof(existingHeader)) != FileHeaderSize) {
+        return false;
+    }
+
+    FileHeader decodedHeader;
+    return decodeFileHeader(existingHeader, sizeof(existingHeader), decodedHeader)
+            && headersMatch(decodedHeader, expectedHeader);
+}
+
 } // namespace
 
 EnergyHistoryClass EnergyHistory;
@@ -373,4 +460,67 @@ void EnergyHistoryClass::loop()
 {
     // Persistence is intentionally not wired yet. See docs/EnergyHistory.md
     // for the on-flash format and retention rules.
+}
+
+bool EnergyHistoryClass::appendBlock(const char* path, const FileHeader& expectedHeader, const uint16_t blockIndex, const uint16_t startKey, const uint8_t* payload, const uint16_t payloadSize, const uint16_t recordCount)
+{
+    if (path == nullptr
+            || payload == nullptr
+            || payloadSize == 0
+            || recordCount == 0
+            || expectedHeader.recordSize == 0
+            || payloadSize != recordCount * expectedHeader.recordSize
+            || !ensureEnergyDirectories(expectedHeader.fileType)
+            || !ensureFileHeader(path, expectedHeader)) {
+        return false;
+    }
+
+    BlockHeader blockHeader;
+    std::memcpy(blockHeader.magic, BlockMagic, sizeof(blockHeader.magic));
+    blockHeader.blockIndex = blockIndex;
+    blockHeader.startKey = startKey;
+    blockHeader.recordCount = recordCount;
+    blockHeader.payloadSize = payloadSize;
+    blockHeader.crc32Payload = calculateCrc32(payload, payloadSize);
+
+    uint8_t encodedBlockHeader[BlockHeaderSize];
+    if (!encodeBlockHeader(blockHeader, encodedBlockHeader, sizeof(encodedBlockHeader))) {
+        return false;
+    }
+
+    File file = LittleFS.open(path, "a");
+    if (!file) {
+        return false;
+    }
+
+    if (!writeFull(file, encodedBlockHeader, sizeof(encodedBlockHeader))
+            || !writeFull(file, payload, payloadSize)) {
+        return false;
+    }
+
+    file.flush();
+    return true;
+}
+
+bool EnergyHistoryClass::appendFiveMinuteBlock(const char* path, const FileHeader& expectedHeader, const FiveMinuteRecord* records, const uint16_t recordCount, const uint16_t blockIndex)
+{
+    if (records == nullptr
+            || recordCount == 0
+            || expectedHeader.fileType != static_cast<uint8_t>(FileType::FiveMinute)
+            || expectedHeader.recordSize != FiveMinuteRecordSize) {
+        return false;
+    }
+
+    uint8_t payload[FiveMinuteRecordSize * 3];
+    if (recordCount > sizeof(payload) / FiveMinuteRecordSize) {
+        return false;
+    }
+
+    for (uint16_t i = 0; i < recordCount; i++) {
+        if (!encodeFiveMinuteRecord(records[i], payload + i * FiveMinuteRecordSize, FiveMinuteRecordSize)) {
+            return false;
+        }
+    }
+
+    return appendBlock(path, expectedHeader, blockIndex, records[0].day, payload, recordCount * FiveMinuteRecordSize, recordCount);
 }
