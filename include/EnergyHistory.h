@@ -100,7 +100,6 @@ public:
     EnergyHistoryClass();
     void init(Scheduler& scheduler);
 
-private:
     struct ScanResult {
         uint32_t filesScanned = 0;
         uint32_t validBlocks = 0;
@@ -113,6 +112,25 @@ private:
         bool canTruncateFinalBlock = false;
     };
 
+    struct Status {
+        uint32_t filesScanned = 0;
+        uint32_t validBlocks = 0;
+        uint32_t skippedBlocks = 0;
+        uint32_t validRecords = 0;
+        uint32_t skippedRecords = 0;
+        uint32_t invalidFinalBlockFiles = 0;
+        uint32_t truncatableFinalBlockFiles = 0;
+        size_t bytesScanned = 0;
+        size_t littlefsTotalBytes = 0;
+        size_t littlefsUsedBytes = 0;
+    };
+
+    bool getStatus(Status& status);
+    bool queryFiveMinuteDay(EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, uint8_t month, uint8_t day, EnergyHistoryFormat::FiveMinuteRecord* records, uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result);
+    bool queryDay(EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, uint16_t fromDayOfYear, uint16_t toDayOfYear, EnergyHistoryFormat::DayRecord* records, uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result);
+    bool queryMonth(EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, uint8_t fromMonth, uint8_t toMonth, EnergyHistoryFormat::MonthRecord* records, uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result);
+
+private:
     struct ManualProbeResult {
         bool fiveMinuteOk = false;
         bool dayOk = false;

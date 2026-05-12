@@ -198,6 +198,20 @@ The manual probe build also writes deterministic demo history for API/UI tests
 under June 2099. These files are intentionally persistent and are overwritten on
 the next probe boot.
 
+## Backend Query Surface
+
+The firmware exposes narrow backend methods for future Web API use:
+
+```text
+status scan across energy files
+5m query for one target and one local day
+day query for one target and a day-of-year range
+month query for one target and a month range
+```
+
+The five-minute query is day-scoped by design so callers cannot accidentally
+request an unbounded monthly dump.
+
 ## Retention
 
 There is no fixed age-based retention for history files. Data is kept
