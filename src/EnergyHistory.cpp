@@ -21,6 +21,7 @@ static constexpr const char* FiveMinuteDirectory = "/energy/5m";
 static constexpr const char* DayDirectory = "/energy/day";
 static constexpr const char* MonthDirectory = "/energy/month";
 static constexpr size_t FileReadBufferSize = 32;
+static constexpr uint16_t MaxRecordsPerAppendBlock = 4;
 
 [[maybe_unused]] void writeUint8(uint8_t* output, const uint8_t value)
 {
@@ -498,6 +499,28 @@ bool skipBytes(File& file, const size_t length)
     return true;
 }
 
+bool upsertFiveMinuteRecord(FiveMinuteRecord* records, const uint16_t recordCapacity, uint16_t& recordCount, const FiveMinuteRecord& record)
+{
+    if (records == nullptr || recordCapacity == 0) {
+        return true;
+    }
+
+    for (uint16_t i = 0; i < recordCount; i++) {
+        if (records[i].day == record.day && records[i].slot == record.slot) {
+            records[i] = record;
+            return true;
+        }
+    }
+
+    if (recordCount >= recordCapacity) {
+        return false;
+    }
+
+    records[recordCount] = record;
+    recordCount++;
+    return true;
+}
+
 } // namespace
 
 EnergyHistoryClass EnergyHistory;
@@ -580,6 +603,46 @@ bool EnergyHistoryClass::appendFiveMinuteBlock(const char* path, const FileHeade
     }
 
     return appendBlock(path, expectedHeader, blockIndex, records[0].day, payload, recordCount * FiveMinuteRecordSize, recordCount);
+}
+
+bool EnergyHistoryClass::appendDayBlock(const char* path, const FileHeader& expectedHeader, const DayRecord* records, const uint16_t recordCount, const uint16_t blockIndex)
+{
+    if (records == nullptr
+            || recordCount == 0
+            || recordCount > MaxRecordsPerAppendBlock
+            || expectedHeader.fileType != static_cast<uint8_t>(FileType::Day)
+            || expectedHeader.recordSize != DayRecordSize) {
+        return false;
+    }
+
+    uint8_t payload[DayRecordSize * MaxRecordsPerAppendBlock];
+    for (uint16_t i = 0; i < recordCount; i++) {
+        if (!encodeDayRecord(records[i], payload + i * DayRecordSize, DayRecordSize)) {
+            return false;
+        }
+    }
+
+    return appendBlock(path, expectedHeader, blockIndex, records[0].dayOfYear, payload, recordCount * DayRecordSize, recordCount);
+}
+
+bool EnergyHistoryClass::appendMonthBlock(const char* path, const FileHeader& expectedHeader, const MonthRecord* records, const uint16_t recordCount, const uint16_t blockIndex)
+{
+    if (records == nullptr
+            || recordCount == 0
+            || recordCount > MaxRecordsPerAppendBlock
+            || expectedHeader.fileType != static_cast<uint8_t>(FileType::Month)
+            || expectedHeader.recordSize != MonthRecordSize) {
+        return false;
+    }
+
+    uint8_t payload[MonthRecordSize * MaxRecordsPerAppendBlock];
+    for (uint16_t i = 0; i < recordCount; i++) {
+        if (!encodeMonthRecord(records[i], payload + i * MonthRecordSize, MonthRecordSize)) {
+            return false;
+        }
+    }
+
+    return appendBlock(path, expectedHeader, blockIndex, records[0].month, payload, recordCount * MonthRecordSize, recordCount);
 }
 
 bool EnergyHistoryClass::scanFile(const char* path, const FileHeader& expectedHeader, ScanResult& result)
@@ -665,12 +728,20 @@ bool EnergyHistoryClass::scanFile(const char* path, const FileHeader& expectedHe
 
 bool EnergyHistoryClass::scanFiveMinuteFile(const char* path, const FileHeader& expectedHeader, ScanResult& result)
 {
+    uint16_t recordCount = 0;
+    return readFiveMinuteFile(path, expectedHeader, nullptr, 0, recordCount, result);
+}
+
+bool EnergyHistoryClass::readFiveMinuteFile(const char* path, const FileHeader& expectedHeader, FiveMinuteRecord* records, const uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result)
+{
     if (path == nullptr
             || expectedHeader.fileType != static_cast<uint8_t>(FileType::FiveMinute)
             || expectedHeader.recordSize != FiveMinuteRecordSize
             || !LittleFS.exists(path)) {
         return false;
     }
+
+    recordCount = 0;
 
     File file = LittleFS.open(path, "r", false);
     if (!file || file.size() < FileHeaderSize || !readValidatedFileHeader(file, expectedHeader)) {
@@ -718,9 +789,35 @@ bool EnergyHistoryClass::scanFiveMinuteFile(const char* path, const FileHeader& 
             break;
         }
 
+        const size_t payloadStart = file.position();
         uint32_t crc = 0xffffffff;
-        uint16_t validRecordsInBlock = 0;
-        uint16_t skippedRecordsInBlock = 0;
+        uint16_t bytesRemaining = blockHeader.payloadSize;
+        uint8_t buffer[FileReadBufferSize];
+
+        while (bytesRemaining > 0) {
+            const size_t chunkSize = bytesRemaining < sizeof(buffer) ? bytesRemaining : sizeof(buffer);
+            if (!readFull(file, buffer, chunkSize)) {
+                result.skippedBlocks++;
+                result.invalidFinalBlock = true;
+                result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
+                return true;
+            }
+
+            crc = updateCrc32(crc, buffer, chunkSize);
+            bytesRemaining -= chunkSize;
+        }
+
+        if (blockHeader.crc32Payload != finalizeCrc32(crc)) {
+            result.skippedBlocks++;
+            continue;
+        }
+
+        if (!file.seek(payloadStart)) {
+            result.skippedBlocks++;
+            result.invalidFinalBlock = true;
+            result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
+            return true;
+        }
 
         for (uint16_t i = 0; i < blockHeader.recordCount; i++) {
             uint8_t encodedRecord[FiveMinuteRecordSize];
@@ -731,24 +828,19 @@ bool EnergyHistoryClass::scanFiveMinuteFile(const char* path, const FileHeader& 
                 return true;
             }
 
-            crc = updateCrc32(crc, encodedRecord, sizeof(encodedRecord));
-
             FiveMinuteRecord record;
-            if (decodeFiveMinuteRecord(encodedRecord, sizeof(encodedRecord), record)) {
-                validRecordsInBlock++;
-            } else {
-                skippedRecordsInBlock++;
+            if (!decodeFiveMinuteRecord(encodedRecord, sizeof(encodedRecord), record)) {
+                result.skippedRecords++;
+                continue;
+            }
+
+            result.validRecords++;
+            if (!upsertFiveMinuteRecord(records, recordCapacity, recordCount, record)) {
+                result.skippedRecords++;
             }
         }
 
-        if (blockHeader.crc32Payload != finalizeCrc32(crc)) {
-            result.skippedBlocks++;
-            continue;
-        }
-
         result.validBlocks++;
-        result.validRecords += validRecordsInBlock;
-        result.skippedRecords += skippedRecordsInBlock;
         result.lastValidOffset = file.position();
     }
 

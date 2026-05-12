@@ -116,8 +116,11 @@ private:
     void loop();
     bool appendBlock(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, uint16_t blockIndex, uint16_t startKey, const uint8_t* payload, uint16_t payloadSize, uint16_t recordCount);
     bool appendFiveMinuteBlock(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, const EnergyHistoryFormat::FiveMinuteRecord* records, uint16_t recordCount, uint16_t blockIndex);
+    bool appendDayBlock(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, const EnergyHistoryFormat::DayRecord* records, uint16_t recordCount, uint16_t blockIndex);
+    bool appendMonthBlock(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, const EnergyHistoryFormat::MonthRecord* records, uint16_t recordCount, uint16_t blockIndex);
     bool scanFile(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, ScanResult& result);
     bool scanFiveMinuteFile(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, ScanResult& result);
+    bool readFiveMinuteFile(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, EnergyHistoryFormat::FiveMinuteRecord* records, uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result);
 
     Task _loopTask;
 };
