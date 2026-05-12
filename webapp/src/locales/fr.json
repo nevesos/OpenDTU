@@ -713,6 +713,7 @@
         "EnergyHistory": "Historique energie",
         "Status": "Statut",
         "Query": "Requete",
+        "Chart": "Graphique",
         "Results": "Resultats",
         "FilesScanned": "Fichiers analyses",
         "ValidBlocks": "Blocs valides",

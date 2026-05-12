@@ -727,6 +727,7 @@
         "EnergyHistory": "Energy History",
         "Status": "Status",
         "Query": "Query",
+        "Chart": "Chart",
         "Results": "Results",
         "FilesScanned": "Files scanned",
         "ValidBlocks": "Valid blocks",

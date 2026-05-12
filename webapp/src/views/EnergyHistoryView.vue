@@ -79,6 +79,19 @@
             </form>
         </CardElement>
 
+        <CardElement :text="$t('energyhistory.Chart')" textVariant="text-bg-primary" add-space>
+            <div class="energy-history-chart">
+                <ChartComponent
+                    v-if="history.data.length > 0"
+                    type="bar"
+                    :data="chartData"
+                    :options="chartOptions"
+                    :height="320"
+                />
+                <div v-else class="text-center text-muted py-4">{{ $t('energyhistory.NoData') }}</div>
+            </div>
+        </CardElement>
+
         <CardElement :text="$t('energyhistory.Results')" textVariant="text-bg-primary" add-space table>
             <div class="table-responsive">
                 <table class="table table-hover table-condensed align-middle">
@@ -129,7 +142,25 @@ import BasePage from '@/components/BasePage.vue';
 import CardElement from '@/components/CardElement.vue';
 import { authHeader, handleResponse } from '@/utils/authentication';
 import { BIconSearch } from 'bootstrap-icons-vue';
+import {
+    BarElement,
+    BarController,
+    CategoryScale,
+    Chart as ChartJS,
+    Filler,
+    Legend,
+    LinearScale,
+    LineController,
+    LineElement,
+    PointElement,
+    Tooltip,
+    type ChartData,
+    type ChartOptions,
+} from 'chart.js';
 import { defineComponent } from 'vue';
+import { Chart as ChartComponent } from 'vue-chartjs';
+
+ChartJS.register(CategoryScale, LinearScale, BarController, LineController, BarElement, LineElement, PointElement, Filler, Tooltip, Legend);
 
 type Resolution = '5m' | 'day' | 'month';
 
@@ -170,6 +201,7 @@ export default defineComponent({
         BasePage,
         CardElement,
         BIconSearch,
+        ChartComponent,
     },
     data() {
         return {
@@ -196,6 +228,97 @@ export default defineComponent({
                 return this.$t('energyhistory.Date');
             }
             return this.$t('energyhistory.Period');
+        },
+        chartData(): ChartData<'bar' | 'line', number[], string> {
+            const labels = this.history.data.map((row) => this.firstColumnValue(row).toString());
+            const powerKey = this.query.resolution === '5m' ? 'avg_power_w' : 'max_power_w';
+            const powerLabel = this.query.resolution === '5m'
+                ? this.$t('energyhistory.AvgPowerW')
+                : this.$t('energyhistory.MaxPowerW');
+
+            return {
+                labels,
+                datasets: [
+                    {
+                        type: this.query.resolution === '5m' ? 'line' : 'bar',
+                        label: this.$t('energyhistory.YieldWh'),
+                        data: this.history.data.map((row) => row.yield_wh || 0),
+                        borderColor: '#198754',
+                        backgroundColor: this.query.resolution === '5m' ? 'rgba(25, 135, 84, 0.16)' : 'rgba(25, 135, 84, 0.65)',
+                        borderWidth: 2,
+                        fill: this.query.resolution === '5m',
+                        tension: 0.25,
+                        pointRadius: this.query.resolution === '5m' ? 0 : 2,
+                        yAxisID: 'yield',
+                    },
+                    {
+                        type: 'line',
+                        label: powerLabel,
+                        data: this.history.data.map((row) => row[powerKey] || 0),
+                        borderColor: '#0d6efd',
+                        backgroundColor: 'rgba(13, 110, 253, 0.12)',
+                        borderWidth: 2,
+                        fill: false,
+                        tension: 0.25,
+                        pointRadius: this.history.data.length > 96 ? 0 : 2,
+                        yAxisID: 'power',
+                    },
+                ],
+            };
+        },
+        chartOptions(): ChartOptions<'bar' | 'line'> {
+            return {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    intersect: false,
+                    mode: 'index',
+                },
+                plugins: {
+                    legend: {
+                        display: true,
+                        position: 'top',
+                    },
+                    tooltip: {
+                        enabled: true,
+                    },
+                },
+                scales: {
+                    x: {
+                        ticks: {
+                            maxRotation: 0,
+                            autoSkip: true,
+                            maxTicksLimit: 12,
+                        },
+                        grid: {
+                            display: false,
+                        },
+                    },
+                    yield: {
+                        type: 'linear',
+                        position: 'left',
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: this.$t('energyhistory.YieldWh'),
+                        },
+                    },
+                    power: {
+                        type: 'linear',
+                        position: 'right',
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: this.query.resolution === '5m'
+                                ? this.$t('energyhistory.AvgPowerW')
+                                : this.$t('energyhistory.MaxPowerW'),
+                        },
+                        grid: {
+                            drawOnChartArea: false,
+                        },
+                    },
+                },
+            };
         },
     },
     created() {
@@ -285,3 +408,10 @@ export default defineComponent({
     },
 });
 </script>
+
+<style scoped>
+.energy-history-chart {
+    position: relative;
+    min-height: 320px;
+}
+</style>
