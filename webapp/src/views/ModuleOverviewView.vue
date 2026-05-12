@@ -57,6 +57,13 @@
                 <option value="yieldDay">{{ $t('moduleoverview.HeatmapYieldDay') }}</option>
                 <option value="yieldDayDiff">{{ $t('moduleoverview.HeatmapYieldDayDiff') }}</option>
             </select>
+            <div v-if="heatmapReferenceRange !== null" class="module-overview-heatmap-legend">
+                <div class="module-overview-heatmap-gradient"></div>
+                <div class="module-overview-heatmap-range">
+                    <span>{{ $t('moduleoverview.HeatmapMin') }}: {{ formatHeatmapLegendValue(heatmapReferenceRange.minimum, heatmapReferenceRange.unit) }}</span>
+                    <span>{{ $t('moduleoverview.HeatmapMax') }}: {{ formatHeatmapLegendValue(heatmapReferenceRange.maximum, heatmapReferenceRange.unit) }}</span>
+                </div>
+            </div>
             <select v-model.number="zoomFactor" class="form-select form-select-sm module-overview-select" :title="$t('moduleoverview.Zoom')">
                 <option :value="0.5">50%</option>
                 <option :value="0.75">75%</option>
@@ -128,7 +135,7 @@
         <div v-if="visibleModules.length > 0" class="row gy-3">
             <div class="col-sm-3 col-md-2 module-overview-inverter-nav-column" :style="[inverterData.length <= 1 ? { display: 'none' } : {}]">
                 <InverterSideNav
-                    v-model="selectedInverterSerial"
+                    v-model="selectedInverterSerials"
                     :inverters="inverterData"
                     :updateIndicators="inverterUpdateIndicators"
                     @select="selectInverter"
@@ -214,7 +221,7 @@
                                 :position="positions[module.key]"
                                 :editMode="editMode"
                                 :isDragging="dragState?.key === module.key"
-                                :isSelected="module.serial === selectedInverterSerial"
+                                :isSelected="selectedInverterSerials.includes(module.serial)"
                                 :heatmapStyle="heatmapStyle(module)"
                                 @pointerdown="onPointerDown($event, module.key)"
                             />
@@ -287,7 +294,7 @@ export default defineComponent({
             liveData: { inverters: [] } as unknown as LiveData,
             isWebsocketConnected: false,
             editMode: false,
-            selectedInverterSerial: null as string | null,
+            selectedInverterSerials: [] as string[],
             inverterUpdateIndicators: {} as Record<string, number>,
             inverterUpdateTimeouts: {} as Record<string, number>,
             showDisabledModules: false,
@@ -474,7 +481,11 @@ export default defineComponent({
             )} ${this.latestInverterFrequency.u}`;
         },
         heatmapModules(): ModuleItem[] {
-            return this.visibleModules.filter((module) => module.pollEnabled);
+            return this.visibleModules.filter(
+                (module) =>
+                    module.pollEnabled &&
+                    (this.selectedInverterSerials.length === 0 || this.selectedInverterSerials.includes(module.serial))
+            );
         },
         heatmapMaximum(): number {
             if (this.heatmapMode === 'none' || this.heatmapMode === 'powerMax' || this.isHeatmapDifferenceMode()) {
@@ -497,6 +508,40 @@ export default defineComponent({
                 minimum: Math.min(...values),
                 maximum: Math.max(...values),
             };
+        },
+        heatmapReferenceRange(): { minimum: number; maximum: number; unit: string } | null {
+            if (this.heatmapMode === 'none' || this.heatmapModules.length === 0) {
+                return null;
+            }
+
+            const unit = this.heatmapReferenceUnit;
+            if (this.isHeatmapDifferenceMode()) {
+                const range = this.heatmapDifferenceRange;
+                return range === null ? null : { ...range, unit };
+            }
+
+            const maximum =
+                this.heatmapMode === 'powerMax' ? Math.max(...this.heatmapModules.map((module) => module.powerMaximum), 0) : this.heatmapMaximum;
+            if (maximum <= 0) {
+                return null;
+            }
+
+            return {
+                minimum: 0,
+                maximum,
+                unit,
+            };
+        },
+        heatmapReferenceUnit(): string {
+            if (this.heatmapMode === 'power' || this.heatmapMode === 'powerMax' || this.heatmapMode === 'powerDiff') {
+                return this.heatmapModules.find((module) => module.Power?.u !== undefined)?.Power?.u ?? 'W';
+            }
+
+            if (this.heatmapMode === 'yieldDay' || this.heatmapMode === 'yieldDayDiff') {
+                return this.heatmapModules.find((module) => module.YieldDay?.u !== undefined)?.YieldDay?.u ?? 'Wh';
+            }
+
+            return '';
         },
         backgroundControlPoints(): BackgroundControlPoint[] {
             return this.backgroundPaths.flatMap((path) =>
@@ -577,17 +622,16 @@ export default defineComponent({
                 }, 0);
             });
         },
-        scrollToSelectedInverterAfterRender() {
+        scrollToSelectedInverterAfterRender(serial?: string) {
             this.$nextTick(() => {
                 window.setTimeout(() => {
-                    this.scrollToSelectedInverter();
+                    this.scrollToSelectedInverter(serial);
                 }, 0);
             });
         },
         selectInverter(serial: string | null) {
-            this.selectedInverterSerial = serial;
             if (serial !== null) {
-                this.scrollToSelectedInverterAfterRender();
+                this.scrollToSelectedInverterAfterRender(serial);
             }
         },
         signalInverterUpdate(serial: string) {
@@ -607,12 +651,13 @@ export default defineComponent({
                 this.inverterUpdateTimeouts = nextTimeouts;
             }, 2500);
         },
-        scrollToSelectedInverter() {
-            if (this.selectedInverterSerial === null) {
+        scrollToSelectedInverter(serial?: string) {
+            const targetSerial = serial ?? this.selectedInverterSerials[0];
+            if (targetSerial === undefined) {
                 return;
             }
 
-            const module = this.visibleModules.find((visibleModule) => visibleModule.serial === this.selectedInverterSerial);
+            const module = this.visibleModules.find((visibleModule) => visibleModule.serial === targetSerial);
             if (module === undefined) {
                 return;
             }
@@ -1419,8 +1464,16 @@ export default defineComponent({
         isHeatmapDifferenceMode(): boolean {
             return this.heatmapMode === 'powerDiff' || this.heatmapMode === 'yieldDayDiff';
         },
+        formatHeatmapLegendValue(value: number, unit: string): string {
+            const formattedValue = this.$n(value, Math.abs(value) >= 100 || value === 0 ? 'decimalNoDigits' : 'decimal');
+            return unit === '' ? formattedValue : `${formattedValue} ${unit}`;
+        },
         heatmapStyle(module: ModuleItem) {
-            if (this.heatmapMode === 'none' || !module.pollEnabled) {
+            if (
+                this.heatmapMode === 'none' ||
+                !module.pollEnabled ||
+                (this.selectedInverterSerials.length > 0 && !this.selectedInverterSerials.includes(module.serial))
+            ) {
                 return {};
             }
 
@@ -1615,6 +1668,38 @@ export default defineComponent({
 
 .module-overview-select {
     width: auto;
+}
+
+.module-overview-heatmap-legend {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 16rem;
+    max-width: 100%;
+    padding: 0.25rem 0.5rem;
+    border: 1px solid var(--bs-border-color);
+    border-radius: var(--bs-border-radius);
+    background-color: var(--bs-body-bg);
+}
+
+.module-overview-heatmap-gradient {
+    flex: 0 0 5.5rem;
+    height: 0.75rem;
+    border: 1px solid var(--bs-border-color-translucent);
+    border-radius: 999px;
+    background: linear-gradient(90deg, hsl(210deg 85% 96%), hsl(135deg 85% 84%), hsl(60deg 85% 72%));
+}
+
+.module-overview-heatmap-range {
+    display: flex;
+    flex: 1 1 auto;
+    gap: 0.5rem;
+    min-width: 0;
+    color: var(--bs-secondary-color);
+    font-size: 0.8rem;
+    line-height: 1.2;
+    white-space: nowrap;
 }
 
 .module-overview-draw-tools {

@@ -75,6 +75,8 @@
         "HeatmapPowerDiff": "Heatmap: Power difference",
         "HeatmapYieldDay": "Heatmap: Daily yield",
         "HeatmapYieldDayDiff": "Heatmap: Daily yield difference",
+        "HeatmapMin": "Min",
+        "HeatmapMax": "Max",
         "Zoom": "Zoom",
         "NoModules": "No module values found.",
         "Channel": "String {channel}"

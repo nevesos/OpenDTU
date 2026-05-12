@@ -1,12 +1,12 @@
 <template>
-    <div class="nav nav-pills row-cols-sm-1 gap-3 w-100 inverter-side-nav" role="tablist" aria-orientation="vertical">
+    <div class="nav nav-pills row-cols-sm-1 gap-3 w-100 inverter-side-nav" role="listbox" aria-multiselectable="true" aria-orientation="vertical">
         <div v-for="inverter in inverters" :key="inverter.serial" class="d-flex align-items-stretch gap-1 w-100">
             <button
                 class="nav-link border border-primary flex-grow-1 inverter-side-nav-select"
-                :class="{ active: inverter.serial === modelValue }"
+                :class="{ active: isSelected(inverter.serial) }"
                 type="button"
-                role="tab"
-                :aria-selected="inverter.serial === modelValue"
+                role="option"
+                :aria-selected="isSelected(inverter.serial)"
                 @click="selectInverter(inverter.serial)"
             >
                 <span
@@ -64,8 +64,8 @@ export default defineComponent({
             required: true,
         },
         modelValue: {
-            type: String as PropType<string | null>,
-            default: null,
+            type: Array as PropType<string[]>,
+            default: () => [],
         },
         updateIndicators: {
             type: Object as PropType<Record<string, number>>,
@@ -74,10 +74,14 @@ export default defineComponent({
     },
     emits: ['update:modelValue', 'select'],
     methods: {
+        isSelected(serial: string): boolean {
+            return this.modelValue.includes(serial);
+        },
         selectInverter(serial: string) {
-            const nextSerial = this.modelValue === serial ? null : serial;
-            this.$emit('update:modelValue', nextSerial);
-            this.$emit('select', nextSerial);
+            const selected = this.isSelected(serial);
+            const nextSerials = selected ? this.modelValue.filter((selectedSerial) => selectedSerial !== serial) : [...this.modelValue, serial];
+            this.$emit('update:modelValue', nextSerials);
+            this.$emit('select', selected ? null : serial);
         },
         inverterInfoLine(inverter: Inverter): string {
             const inverterChannelData = Object.values(inverter.INV || {})[0] as InverterStatistics | undefined;

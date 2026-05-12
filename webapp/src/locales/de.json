@@ -75,6 +75,8 @@
         "HeatmapPowerDiff": "Heatmap: Leistungsdifferenz",
         "HeatmapYieldDay": "Heatmap: Tagesertrag",
         "HeatmapYieldDayDiff": "Heatmap: Tagesertragsdifferenz",
+        "HeatmapMin": "Min",
+        "HeatmapMax": "Max",
         "Zoom": "Zoom",
         "NoModules": "Keine Modulwerte gefunden.",
         "Channel": "String {channel}"
