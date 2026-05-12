@@ -196,20 +196,22 @@ daily max power, and `runtimeMin` is the sum of daily runtime minutes.
 
 ## Retention
 
-Default proposal:
+There is no fixed age-based retention for history files. Data is kept
+indefinitely unless LittleFS free space becomes low.
+
+Low-free-space cleanup is allowed to delete only old per-inverter five-minute
+files:
 
 ```text
-5m total:       24 months
-5m per inverter: 12 months
-day:            30 years
-month:          30 years
+/energy/5m/inv_<serial>_YYYY_MM.eh5
 ```
 
-On low free space:
+Cleanup rules:
 
-1. Delete oldest five-minute files first.
-2. Prefer reducing five-minute retention over deleting aggregate history.
-3. Do not delete day/month history unless explicitly configured.
+1. Delete the oldest per-inverter five-minute files first.
+2. Do not delete `/energy/5m/total_YYYY_MM.eh5`.
+3. Do not delete day or month aggregate files.
+4. Ignore unrecognized file names and unrelated LittleFS files.
 
 ## Recovery
 
