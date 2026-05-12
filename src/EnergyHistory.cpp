@@ -651,7 +651,7 @@ void EnergyHistoryClass::init(Scheduler& scheduler)
     if (probeOk) {
         ESP_LOGI(
                 EnergyHistoryTag,
-                "Manual persistence probe ok: 5m=%u day=%u month=%u headerMismatch=%u corruptHeader=%u corruptCrc=%u incompleteFinal=%u truncateFinal=%u smallBuffer=%u cleanup=%u records=%u/%u/%u blocks=%" PRIu32 "/%" PRIu32 "/%" PRIu32,
+                "Manual persistence probe ok: 5m=%u day=%u month=%u headerMismatch=%u corruptHeader=%u corruptCrc=%u incompleteFinal=%u truncateFinal=%u smallBuffer=%u demoData=%u cleanup=%u records=%u/%u/%u blocks=%" PRIu32 "/%" PRIu32 "/%" PRIu32,
                 probe.fiveMinuteOk,
                 probe.dayOk,
                 probe.monthOk,
@@ -661,6 +661,7 @@ void EnergyHistoryClass::init(Scheduler& scheduler)
                 probe.incompleteFinalBlockOk,
                 probe.truncateFinalBlockOk,
                 probe.smallBufferOk,
+                probe.demoDataOk,
                 probe.cleanupOk,
                 probe.fiveMinuteRecordsRead,
                 probe.dayRecordsRead,
@@ -671,7 +672,7 @@ void EnergyHistoryClass::init(Scheduler& scheduler)
     } else {
         ESP_LOGE(
                 EnergyHistoryTag,
-                "Manual persistence probe failed: 5m=%u day=%u month=%u headerMismatch=%u corruptHeader=%u corruptCrc=%u incompleteFinal=%u truncateFinal=%u smallBuffer=%u cleanup=%u records=%u/%u/%u blocks=%" PRIu32 "/%" PRIu32 "/%" PRIu32,
+                "Manual persistence probe failed: 5m=%u day=%u month=%u headerMismatch=%u corruptHeader=%u corruptCrc=%u incompleteFinal=%u truncateFinal=%u smallBuffer=%u demoData=%u cleanup=%u records=%u/%u/%u blocks=%" PRIu32 "/%" PRIu32 "/%" PRIu32,
                 probe.fiveMinuteOk,
                 probe.dayOk,
                 probe.monthOk,
@@ -681,6 +682,7 @@ void EnergyHistoryClass::init(Scheduler& scheduler)
                 probe.incompleteFinalBlockOk,
                 probe.truncateFinalBlockOk,
                 probe.smallBufferOk,
+                probe.demoDataOk,
                 probe.cleanupOk,
                 probe.fiveMinuteRecordsRead,
                 probe.dayRecordsRead,

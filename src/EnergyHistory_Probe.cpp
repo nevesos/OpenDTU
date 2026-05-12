@@ -15,6 +15,13 @@ using namespace EnergyHistoryFormat;
 static constexpr uint64_t ManualProbeSerial = 999999999001ULL;
 static constexpr uint16_t ManualProbeYear = 2099;
 static constexpr uint8_t ManualProbeMonth = 1;
+static constexpr uint64_t DemoSerialA = 999999990101ULL;
+static constexpr uint64_t DemoSerialB = 999999990102ULL;
+static constexpr uint16_t DemoYear = 2099;
+static constexpr uint8_t DemoMonth = 6;
+static constexpr uint8_t DemoDays = 7;
+static constexpr uint16_t DemoFirstSlot = 72;
+static constexpr uint16_t DemoLastSlot = 216;
 static constexpr const char* ProbeTag = "EnergyHistoryProbe";
 
 template <typename Scan>
@@ -68,7 +75,113 @@ bool ensureProbeDirectory(const char* path)
     return directory && directory.isDirectory();
 }
 
+bool pathIsAbsent(const String& path)
+{
+    File file = LittleFS.open(path, "r", false);
+    return !file;
+}
+
+uint32_t demoInverterYieldWh(const uint8_t inverterIndex, const uint8_t day, const uint16_t slot)
+{
+    if (slot <= DemoFirstSlot) {
+        return 0;
+    }
+
+    const uint16_t daylightSlots = DemoLastSlot - DemoFirstSlot;
+    const uint16_t progress = slot >= DemoLastSlot ? daylightSlots : slot - DemoFirstSlot;
+    const uint32_t dayYieldWh = (inverterIndex == 0 ? 2600U : 1800U)
+            + static_cast<uint32_t>(day - 1) * (inverterIndex == 0 ? 80U : 55U);
+    return (dayYieldWh * progress + daylightSlots / 2U) / daylightSlots;
+}
+
+uint32_t demoYieldWh(const TargetType targetType, const uint8_t inverterIndex, const uint8_t day, const uint16_t slot)
+{
+    if (targetType == TargetType::Total) {
+        return demoInverterYieldWh(0, day, slot) + demoInverterYieldWh(1, day, slot);
+    }
+
+    return demoInverterYieldWh(inverterIndex, day, slot);
+}
+
 } // namespace
+
+bool EnergyHistoryClass::writeDemoData()
+{
+    ESP_LOGI(ProbeTag, "demo data write start");
+
+    const bool dirsOk = ensureProbeDirectory("/energy")
+            && ensureProbeDirectory("/energy/5m")
+            && ensureProbeDirectory("/energy/day")
+            && ensureProbeDirectory("/energy/month");
+    if (!dirsOk) {
+        ESP_LOGE(ProbeTag, "demo data directory setup failed");
+        return false;
+    }
+
+    const auto resetTarget = [this](const TargetType targetType, const uint64_t serial) {
+        const String fiveMinutePath = makeFiveMinutePath(targetType, serial, DemoYear, DemoMonth);
+        const String dayPath = makeDayPath(targetType, serial, DemoYear);
+        const String monthPath = makeMonthPath(targetType, serial, DemoYear);
+        if (fiveMinutePath.isEmpty() || dayPath.isEmpty() || monthPath.isEmpty()) {
+            return false;
+        }
+
+        LittleFS.remove(fiveMinutePath);
+        LittleFS.remove(dayPath);
+        LittleFS.remove(monthPath);
+        return pathIsAbsent(fiveMinutePath) && pathIsAbsent(dayPath) && pathIsAbsent(monthPath);
+    };
+
+    const bool resetOk = resetTarget(TargetType::Total, 0)
+            && resetTarget(TargetType::Inverter, DemoSerialA)
+            && resetTarget(TargetType::Inverter, DemoSerialB);
+    if (!resetOk) {
+        ESP_LOGE(ProbeTag, "demo data reset failed");
+        return false;
+    }
+
+    struct DemoTarget {
+        TargetType targetType;
+        uint64_t serial;
+        uint8_t inverterIndex;
+    };
+    const DemoTarget targets[] = {
+        { TargetType::Total, 0, 0 },
+        { TargetType::Inverter, DemoSerialA, 0 },
+        { TargetType::Inverter, DemoSerialB, 1 },
+    };
+
+    bool ok = true;
+    for (const DemoTarget& target : targets) {
+        for (uint8_t day = 1; day <= DemoDays; day++) {
+            FiveMinuteRecord records[3];
+            uint16_t recordCount = 0;
+
+            for (uint16_t slot = DemoFirstSlot; slot <= DemoLastSlot; slot++) {
+                FiveMinuteRecord& record = records[recordCount];
+                record.day = day;
+                record.slot = slot;
+                record.yieldDayWh = demoYieldWh(target.targetType, target.inverterIndex, day, slot);
+                record.flags = RecordFlagValid | RecordFlagReachable;
+                if (slot > DemoFirstSlot && slot < DemoLastSlot) {
+                    record.flags |= RecordFlagProducing;
+                }
+
+                recordCount++;
+                if (recordCount == sizeof(records) / sizeof(records[0]) || slot == DemoLastSlot) {
+                    const uint16_t blockIndex = static_cast<uint16_t>((day - 1) * FiveMinuteSlotsPerDay + records[0].slot);
+                    ok = writeFiveMinute(target.targetType, target.serial, DemoYear, DemoMonth, records, recordCount, blockIndex) && ok;
+                    recordCount = 0;
+                }
+            }
+
+            ok = finalizeCompletedPeriod(target.targetType, target.serial, DemoYear, DemoMonth, day, day == DemoDays) && ok;
+        }
+    }
+
+    ESP_LOGI(ProbeTag, "demo data write result=%u", ok);
+    return ok;
+}
 
 bool EnergyHistoryClass::runManualPersistenceProbe(ManualProbeResult& result)
 {
@@ -311,10 +424,11 @@ bool EnergyHistoryClass::runManualPersistenceProbe(ManualProbeResult& result)
     const bool removeDayOk = LittleFS.remove(dayPath);
     const bool removeMonthOk = LittleFS.remove(monthPath);
     result.cleanupOk = removeFiveMinuteOk && removeDayOk && removeMonthOk;
+    result.demoDataOk = writeDemoData();
     ESP_LOGI(ProbeTag, "cleanup: 5m=%u day=%u month=%u", removeFiveMinuteOk, removeDayOk, removeMonthOk);
     ESP_LOGI(
             ProbeTag,
-            "probe result: 5m=%u day=%u month=%u headerMismatch=%u corruptHeader=%u corruptCrc=%u incompleteFinal=%u truncateFinal=%u smallBuffer=%u cleanup=%u",
+            "probe result: 5m=%u day=%u month=%u headerMismatch=%u corruptHeader=%u corruptCrc=%u incompleteFinal=%u truncateFinal=%u smallBuffer=%u demoData=%u cleanup=%u",
             result.fiveMinuteOk,
             result.dayOk,
             result.monthOk,
@@ -324,6 +438,7 @@ bool EnergyHistoryClass::runManualPersistenceProbe(ManualProbeResult& result)
             result.incompleteFinalBlockOk,
             result.truncateFinalBlockOk,
             result.smallBufferOk,
+            result.demoDataOk,
             result.cleanupOk);
 
     return result.fiveMinuteOk
@@ -335,5 +450,6 @@ bool EnergyHistoryClass::runManualPersistenceProbe(ManualProbeResult& result)
             && result.incompleteFinalBlockOk
             && result.truncateFinalBlockOk
             && result.smallBufferOk
+            && result.demoDataOk
             && result.cleanupOk;
 }

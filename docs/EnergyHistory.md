@@ -194,6 +194,10 @@ Monthly aggregates are derived from daily aggregate records for the completed
 local month. `yieldWh` is the sum of daily yields, `maxPowerW` is the highest
 daily max power, and `runtimeMin` is the sum of daily runtime minutes.
 
+The manual probe build also writes deterministic demo history for API/UI tests
+under June 2099. These files are intentionally persistent and are overwritten on
+the next probe boot.
+
 ## Retention
 
 There is no fixed age-based retention for history files. Data is kept
