@@ -1,0 +1,291 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+/*
+ * Copyright (C) 2026 urdev
+ */
+#include "WebApi_energy_history.h"
+#include "EnergyHistory.h"
+#include "WebApi.h"
+#include "WebApi_errors.h"
+#include <AsyncJson.h>
+#include <cstdlib>
+
+namespace {
+
+using namespace EnergyHistoryFormat;
+
+bool parseUint16Param(AsyncWebServerRequest* request, const char* name, uint16_t& value)
+{
+    if (!request->hasParam(name)) {
+        return false;
+    }
+
+    char* end = nullptr;
+    const unsigned long parsed = std::strtoul(request->getParam(name)->value().c_str(), &end, 10);
+    if (end == nullptr || *end != '\0' || parsed > UINT16_MAX) {
+        return false;
+    }
+
+    value = static_cast<uint16_t>(parsed);
+    return true;
+}
+
+bool parseUint8Param(AsyncWebServerRequest* request, const char* name, uint8_t& value)
+{
+    uint16_t parsed = 0;
+    if (!parseUint16Param(request, name, parsed) || parsed > UINT8_MAX) {
+        return false;
+    }
+
+    value = static_cast<uint8_t>(parsed);
+    return true;
+}
+
+bool parseTarget(AsyncWebServerRequest* request, TargetType& targetType, uint64_t& serial)
+{
+    targetType = TargetType::Total;
+    serial = 0;
+    if (!request->hasParam("target")) {
+        return true;
+    }
+
+    const String target = request->getParam("target")->value();
+    if (target == "total") {
+        return true;
+    }
+
+    if (!target.startsWith("inv_")) {
+        return false;
+    }
+
+    const String serialString = target.substring(4);
+    if (serialString.isEmpty()) {
+        return false;
+    }
+
+    char* end = nullptr;
+    serial = std::strtoull(serialString.c_str(), &end, 10);
+    if (end == nullptr || *end != '\0' || serial == 0) {
+        return false;
+    }
+
+    targetType = TargetType::Inverter;
+    return true;
+}
+
+bool parseDate(const String& date, uint16_t& year, uint8_t& month, uint8_t& day)
+{
+    if (date.length() != 10 || date[4] != '-' || date[7] != '-') {
+        return false;
+    }
+
+    year = static_cast<uint16_t>(date.substring(0, 4).toInt());
+    month = static_cast<uint8_t>(date.substring(5, 7).toInt());
+    day = static_cast<uint8_t>(date.substring(8, 10).toInt());
+    return year >= 2000 && month >= 1 && month <= 12 && day >= 1 && day <= 31;
+}
+
+void writeScan(JsonObject root, const EnergyHistoryClass::ScanResult& scan)
+{
+    root["files_scanned"] = scan.filesScanned;
+    root["valid_blocks"] = scan.validBlocks;
+    root["skipped_blocks"] = scan.skippedBlocks;
+    root["valid_records"] = scan.validRecords;
+    root["skipped_records"] = scan.skippedRecords;
+    root["file_size"] = scan.fileSize;
+    root["last_valid_offset"] = scan.lastValidOffset;
+    root["invalid_final_block"] = scan.invalidFinalBlock;
+    root["can_truncate_final_block"] = scan.canTruncateFinalBlock;
+}
+
+void sendBadRequest(AsyncWebServerRequest* request, const char* message)
+{
+    AsyncJsonResponse* response = new AsyncJsonResponse();
+    auto& root = response->getRoot();
+    root["type"] = "warning";
+    root["message"] = message;
+    root["code"] = WebApiError::GenericValueMissing;
+    response->setCode(400);
+    WebApi.sendJsonResponse(request, response, __FUNCTION__, __LINE__);
+}
+
+} // namespace
+
+void WebApiEnergyHistoryClass::init(AsyncWebServer& server, Scheduler& scheduler)
+{
+    using std::placeholders::_1;
+
+    server.on("/api/energy/history/status", HTTP_GET, static_cast<ArRequestHandlerFunction>(std::bind(&WebApiEnergyHistoryClass::onStatus, this, _1)));
+    server.on("/api/energy/history", HTTP_GET, static_cast<ArRequestHandlerFunction>(std::bind(&WebApiEnergyHistoryClass::onHistory, this, _1)));
+}
+
+void WebApiEnergyHistoryClass::onStatus(AsyncWebServerRequest* request)
+{
+    if (!WebApi.checkCredentialsReadonly(request)) {
+        return;
+    }
+
+    EnergyHistoryClass::Status status;
+    EnergyHistory.getStatus(status);
+
+    AsyncJsonResponse* response = new AsyncJsonResponse();
+    auto& root = response->getRoot();
+    root["files_scanned"] = status.filesScanned;
+    root["valid_blocks"] = status.validBlocks;
+    root["skipped_blocks"] = status.skippedBlocks;
+    root["valid_records"] = status.validRecords;
+    root["skipped_records"] = status.skippedRecords;
+    root["invalid_final_block_files"] = status.invalidFinalBlockFiles;
+    root["truncatable_final_block_files"] = status.truncatableFinalBlockFiles;
+    root["bytes_scanned"] = status.bytesScanned;
+    root["littlefs_total"] = status.littlefsTotalBytes;
+    root["littlefs_used"] = status.littlefsUsedBytes;
+
+    WebApi.sendJsonResponse(request, response, __FUNCTION__, __LINE__);
+}
+
+void WebApiEnergyHistoryClass::onHistory(AsyncWebServerRequest* request)
+{
+    if (!WebApi.checkCredentialsReadonly(request)) {
+        return;
+    }
+
+    if (!request->hasParam("resolution")) {
+        sendBadRequest(request, "Missing resolution");
+        return;
+    }
+
+    TargetType targetType = TargetType::Total;
+    uint64_t serial = 0;
+    if (!parseTarget(request, targetType, serial)) {
+        sendBadRequest(request, "Invalid target");
+        return;
+    }
+
+    const String resolution = request->getParam("resolution")->value();
+    EnergyHistoryClass::ScanResult scan;
+    AsyncJsonResponse* response = new AsyncJsonResponse();
+    auto& root = response->getRoot();
+    root["target"] = targetType == TargetType::Total ? "total" : String("inv_") + String(serial);
+    root["resolution"] = resolution;
+    JsonArray data = root["data"].to<JsonArray>();
+
+    bool queryOk = false;
+    if (resolution == "5m") {
+        if (!request->hasParam("date")) {
+            delete response;
+            sendBadRequest(request, "Missing date");
+            return;
+        }
+
+        uint16_t year = 0;
+        uint8_t month = 0;
+        uint8_t day = 0;
+        if (!parseDate(request->getParam("date")->value(), year, month, day)) {
+            delete response;
+            sendBadRequest(request, "Invalid date");
+            return;
+        }
+
+        FiveMinuteRecord records[FiveMinuteSlotsPerDay];
+        uint16_t recordCount = 0;
+        queryOk = EnergyHistory.queryFiveMinuteDay(targetType, serial, year, month, day, records, sizeof(records) / sizeof(records[0]), recordCount, scan);
+        root["date"] = request->getParam("date")->value();
+
+        for (uint16_t i = 0; queryOk && i < recordCount; i++) {
+            JsonObject item = data.add<JsonObject>();
+            item["day"] = records[i].day;
+            item["slot"] = records[i].slot;
+            item["yield_wh"] = records[i].yieldDayWh;
+            item["flags"] = records[i].flags;
+        }
+    } else if (resolution == "day") {
+        uint16_t year = 0;
+        uint16_t from = 1;
+        uint16_t to = 366;
+        if (!parseUint16Param(request, "year", year)) {
+            delete response;
+            sendBadRequest(request, "Missing or invalid year");
+            return;
+        }
+        if (request->hasParam("from") && !parseUint16Param(request, "from", from)) {
+            delete response;
+            sendBadRequest(request, "Invalid from");
+            return;
+        }
+        if (request->hasParam("to") && !parseUint16Param(request, "to", to)) {
+            delete response;
+            sendBadRequest(request, "Invalid to");
+            return;
+        }
+
+        DayRecord records[366];
+        uint16_t recordCount = 0;
+        queryOk = EnergyHistory.queryDay(targetType, serial, year, from, to, records, sizeof(records) / sizeof(records[0]), recordCount, scan);
+        root["year"] = year;
+        root["from"] = from;
+        root["to"] = to;
+
+        for (uint16_t i = 0; queryOk && i < recordCount; i++) {
+            JsonObject item = data.add<JsonObject>();
+            item["day_of_year"] = records[i].dayOfYear;
+            item["yield_wh"] = records[i].yieldWh;
+            item["max_power_w"] = records[i].maxPowerW;
+            item["avg_power_w"] = records[i].avgPowerW;
+            item["runtime_min"] = records[i].runtimeMin;
+            item["sample_count"] = records[i].sampleCount;
+            item["flags"] = records[i].flags;
+        }
+    } else if (resolution == "month") {
+        uint16_t year = 0;
+        uint8_t from = 1;
+        uint8_t to = 12;
+        if (!parseUint16Param(request, "year", year)) {
+            delete response;
+            sendBadRequest(request, "Missing or invalid year");
+            return;
+        }
+        if (request->hasParam("from") && !parseUint8Param(request, "from", from)) {
+            delete response;
+            sendBadRequest(request, "Invalid from");
+            return;
+        }
+        if (request->hasParam("to") && !parseUint8Param(request, "to", to)) {
+            delete response;
+            sendBadRequest(request, "Invalid to");
+            return;
+        }
+
+        MonthRecord records[12];
+        uint16_t recordCount = 0;
+        queryOk = EnergyHistory.queryMonth(targetType, serial, year, from, to, records, sizeof(records) / sizeof(records[0]), recordCount, scan);
+        root["year"] = year;
+        root["from"] = from;
+        root["to"] = to;
+
+        for (uint16_t i = 0; queryOk && i < recordCount; i++) {
+            JsonObject item = data.add<JsonObject>();
+            item["month"] = records[i].month;
+            item["yield_wh"] = records[i].yieldWh;
+            item["max_power_w"] = records[i].maxPowerW;
+            item["avg_power_w"] = records[i].avgPowerW;
+            item["runtime_min"] = records[i].runtimeMin;
+            item["day_count"] = records[i].dayCount;
+            item["flags"] = records[i].flags;
+        }
+    } else {
+        delete response;
+        sendBadRequest(request, "Invalid resolution");
+        return;
+    }
+
+    root["count"] = data.size();
+    writeScan(root["scan"].to<JsonObject>(), scan);
+    if (!queryOk) {
+        root["type"] = "warning";
+        root["message"] = "History query failed";
+        root["code"] = WebApiError::GenericNoValueFound;
+        response->setCode(404);
+    }
+
+    WebApi.sendJsonResponse(request, response, __FUNCTION__, __LINE__);
+}

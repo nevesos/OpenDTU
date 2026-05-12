@@ -212,6 +212,25 @@ month query for one target and a month range
 The five-minute query is day-scoped by design so callers cannot accidentally
 request an unbounded monthly dump.
 
+## Web API
+
+Status:
+
+```text
+GET /api/energy/history/status
+```
+
+History:
+
+```text
+GET /api/energy/history?resolution=5m&target=total&date=YYYY-MM-DD
+GET /api/energy/history?resolution=day&target=total&year=YYYY&from=1&to=366
+GET /api/energy/history?resolution=month&target=total&year=YYYY&from=1&to=12
+```
+
+`target` defaults to `total` and may also be `inv_<serial>`. The five-minute
+endpoint is intentionally limited to one day per request.
+
 ## Retention
 
 There is no fixed age-based retention for history files. Data is kept
