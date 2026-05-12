@@ -31,6 +31,11 @@
                             $t('menu.ModuleOverview')
                         }}</router-link>
                     </li>
+                    <li class="nav-item">
+                        <router-link @click="onClick" class="nav-link" to="/energy-history">{{
+                            $t('menu.EnergyHistory')
+                        }}</router-link>
+                    </li>
                     <li class="nav-item dropdown">
                         <a
                             class="nav-link dropdown-toggle"

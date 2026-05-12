@@ -8,6 +8,8 @@
 #include "WebApi_errors.h"
 #include <AsyncJson.h>
 #include <cstdlib>
+#include <memory>
+#include <new>
 
 namespace {
 
@@ -186,9 +188,15 @@ void WebApiEnergyHistoryClass::onHistory(AsyncWebServerRequest* request)
             return;
         }
 
-        FiveMinuteRecord records[FiveMinuteSlotsPerDay];
+        std::unique_ptr<FiveMinuteRecord[]> records(new (std::nothrow) FiveMinuteRecord[FiveMinuteSlotsPerDay]);
+        if (!records) {
+            delete response;
+            sendBadRequest(request, "Out of memory");
+            return;
+        }
+
         uint16_t recordCount = 0;
-        queryOk = EnergyHistory.queryFiveMinuteDay(targetType, serial, year, month, day, records, sizeof(records) / sizeof(records[0]), recordCount, scan);
+        queryOk = EnergyHistory.queryFiveMinuteDay(targetType, serial, year, month, day, records.get(), FiveMinuteSlotsPerDay, recordCount, scan);
         root["date"] = request->getParam("date")->value();
 
         for (uint16_t i = 0; queryOk && i < recordCount; i++) {
@@ -218,9 +226,15 @@ void WebApiEnergyHistoryClass::onHistory(AsyncWebServerRequest* request)
             return;
         }
 
-        DayRecord records[366];
+        std::unique_ptr<DayRecord[]> records(new (std::nothrow) DayRecord[366]);
+        if (!records) {
+            delete response;
+            sendBadRequest(request, "Out of memory");
+            return;
+        }
+
         uint16_t recordCount = 0;
-        queryOk = EnergyHistory.queryDay(targetType, serial, year, from, to, records, sizeof(records) / sizeof(records[0]), recordCount, scan);
+        queryOk = EnergyHistory.queryDay(targetType, serial, year, from, to, records.get(), 366, recordCount, scan);
         root["year"] = year;
         root["from"] = from;
         root["to"] = to;
@@ -255,9 +269,15 @@ void WebApiEnergyHistoryClass::onHistory(AsyncWebServerRequest* request)
             return;
         }
 
-        MonthRecord records[12];
+        std::unique_ptr<MonthRecord[]> records(new (std::nothrow) MonthRecord[12]);
+        if (!records) {
+            delete response;
+            sendBadRequest(request, "Out of memory");
+            return;
+        }
+
         uint16_t recordCount = 0;
-        queryOk = EnergyHistory.queryMonth(targetType, serial, year, from, to, records, sizeof(records) / sizeof(records[0]), recordCount, scan);
+        queryOk = EnergyHistory.queryMonth(targetType, serial, year, from, to, records.get(), 12, recordCount, scan);
         root["year"] = year;
         root["from"] = from;
         root["to"] = to;

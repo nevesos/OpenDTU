@@ -154,6 +154,7 @@ private:
         ScanResult smallBufferScan;
     };
 
+    void startupLoop();
     void loop();
     bool makeFileHeader(EnergyHistoryFormat::FileType fileType, EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, uint8_t month, EnergyHistoryFormat::FileHeader& header);
     String makeFiveMinutePath(EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, uint8_t month);
@@ -188,6 +189,7 @@ private:
     bool buildMonthRecordFromDay(EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, uint8_t month, EnergyHistoryFormat::MonthRecord& record);
 
     Task _loopTask;
+    Task _startupTask;
     bool _lastFiveMinuteSlotValid = false;
     uint16_t _lastFiveMinuteYear = 0;
     uint8_t _lastFiveMinuteMonth = 0;

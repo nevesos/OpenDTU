@@ -10,6 +10,8 @@
 #include <cstdio>
 #include <cstring>
 #include <inttypes.h>
+#include <memory>
+#include <new>
 
 namespace {
 
@@ -639,10 +641,19 @@ EnergyHistoryClass EnergyHistory;
 
 EnergyHistoryClass::EnergyHistoryClass()
     : _loopTask(5 * 60 * TASK_SECOND, TASK_FOREVER, std::bind(&EnergyHistoryClass::loop, this))
+    , _startupTask(TASK_IMMEDIATE, TASK_ONCE, std::bind(&EnergyHistoryClass::startupLoop, this))
 {
 }
 
 void EnergyHistoryClass::init(Scheduler& scheduler)
+{
+    scheduler.addTask(_startupTask);
+    scheduler.addTask(_loopTask);
+    _startupTask.enable();
+    _loopTask.enable();
+}
+
+void EnergyHistoryClass::startupLoop()
 {
 #if defined(ENERGY_HISTORY_MANUAL_PROBE)
     esp_log_level_set(EnergyHistoryTag, ESP_LOG_VERBOSE);
@@ -694,9 +705,6 @@ void EnergyHistoryClass::init(Scheduler& scheduler)
 #endif
 
     recoverExistingEnergyFiles();
-
-    scheduler.addTask(_loopTask);
-    _loopTask.enable();
 }
 
 bool EnergyHistoryClass::makeFileHeader(const FileType fileType, const TargetType targetType, const uint64_t serial, const uint16_t year, const uint8_t month, FileHeader& header)
@@ -1489,9 +1497,13 @@ bool EnergyHistoryClass::queryDay(const TargetType targetType, const uint64_t se
         return false;
     }
 
-    DayRecord allRecords[366];
+    std::unique_ptr<DayRecord[]> allRecords(new (std::nothrow) DayRecord[366]);
+    if (!allRecords) {
+        return false;
+    }
+
     uint16_t allRecordCount = 0;
-    if (!readDayFile(path.c_str(), header, allRecords, sizeof(allRecords) / sizeof(allRecords[0]), allRecordCount, result)) {
+    if (!readDayFile(path.c_str(), header, allRecords.get(), 366, allRecordCount, result)) {
         return false;
     }
 
@@ -1534,9 +1546,13 @@ bool EnergyHistoryClass::queryMonth(const TargetType targetType, const uint64_t 
         return false;
     }
 
-    MonthRecord allRecords[12];
+    std::unique_ptr<MonthRecord[]> allRecords(new (std::nothrow) MonthRecord[12]);
+    if (!allRecords) {
+        return false;
+    }
+
     uint16_t allRecordCount = 0;
-    if (!readMonthFile(path.c_str(), header, allRecords, sizeof(allRecords) / sizeof(allRecords[0]), allRecordCount, result)) {
+    if (!readMonthFile(path.c_str(), header, allRecords.get(), 12, allRecordCount, result)) {
         return false;
     }
 
@@ -1580,8 +1596,11 @@ bool EnergyHistoryClass::buildDayRecordFromFiveMinute(const TargetType targetTyp
     }
 
     const size_t fileSize = file.size();
-    bool slotsPresent[FiveMinuteSlotsPerDay] = {};
-    FiveMinuteRecord slots[FiveMinuteSlotsPerDay] = {};
+    std::unique_ptr<bool[]> slotsPresent(new (std::nothrow) bool[FiveMinuteSlotsPerDay]());
+    std::unique_ptr<FiveMinuteRecord[]> slots(new (std::nothrow) FiveMinuteRecord[FiveMinuteSlotsPerDay]());
+    if (!slotsPresent || !slots) {
+        return false;
+    }
 
     while (file.available() > 0) {
         const size_t remaining = fileSize - file.position();
@@ -1724,11 +1743,15 @@ bool EnergyHistoryClass::buildMonthRecordFromDay(const TargetType targetType, co
         return false;
     }
 
-    DayRecord days[366] = {};
+    std::unique_ptr<DayRecord[]> days(new (std::nothrow) DayRecord[366]());
+    if (!days) {
+        return false;
+    }
+
     bool daysPresent[31] = {};
     uint16_t recordCount = 0;
     ScanResult scan;
-    if (!readDayFile(path.c_str(), header, days, sizeof(days) / sizeof(days[0]), recordCount, scan)) {
+    if (!readDayFile(path.c_str(), header, days.get(), 366, recordCount, scan)) {
         return false;
     }
 
