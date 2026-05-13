@@ -181,6 +181,12 @@ Five-minute data should be appended in small blocks. The API must deduplicate by
 `day + slot` when repeated writes occur; the last valid record wins. This avoids
 in-place rewrites and keeps flash wear low.
 
+Runtime five-minute samples are written only during the configured day period
+from `SunPosition`. If sunrise/sunset calculation is unavailable, sampling
+continues so a broken location or twilight configuration does not disable
+history recording. Day and month boundaries are finalized before the night
+check.
+
 Daily and monthly aggregates should be append/update-log style where practical.
 If duplicate aggregate records exist, the last valid record for the same key
 wins.

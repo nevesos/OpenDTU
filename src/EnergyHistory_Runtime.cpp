@@ -5,6 +5,7 @@
 #include "EnergyHistory.h"
 #include "Configuration.h"
 #include "Datastore.h"
+#include "SunPosition.h"
 #include <Hoymiles.h>
 #include <ctime>
 
@@ -92,6 +93,15 @@ bool EnergyHistoryClass::persistCurrentFiveMinuteSlot()
 
             finalizeCompletedPeriod(TargetType::Inverter, inv->serial(), _lastFiveMinuteYear, _lastFiveMinuteMonth, _lastFiveMinuteDay, monthChanged);
         }
+    }
+
+    if (SunPosition.isSunsetAvailable() && !SunPosition.isDayPeriod()) {
+        _lastFiveMinuteSlotValid = true;
+        _lastFiveMinuteYear = year;
+        _lastFiveMinuteMonth = month;
+        _lastFiveMinuteDay = day;
+        _lastFiveMinuteSlot = slot;
+        return true;
     }
 
     const uint16_t blockIndex = static_cast<uint16_t>((day - 1) * FiveMinuteSlotsPerDay + slot);
