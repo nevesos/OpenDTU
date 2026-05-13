@@ -239,6 +239,11 @@ function statusValue(value?: number): number {
     return value || 0;
 }
 
+const DemoHistoryTargets = [
+    { id: 'inv_999999990101', label: 'Demo WR 1' },
+    { id: 'inv_999999990102', label: 'Demo WR 2' },
+];
+
 export default defineComponent({
     components: {
         BasePage,
@@ -452,6 +457,10 @@ export default defineComponent({
             return {
                 responsive: true,
                 maintainAspectRatio: false,
+                interaction: {
+                    intersect: false,
+                    mode: 'index',
+                },
                 plugins: {
                     legend: {
                         display: true,
@@ -459,6 +468,25 @@ export default defineComponent({
                     },
                     tooltip: {
                         enabled: true,
+                        mode: 'index',
+                        intersect: false,
+                        callbacks: {
+                            label: (item) => {
+                                const value = typeof item.parsed.y === 'number' ? item.parsed.y : 0;
+                                return `${item.dataset.label || ''}: ${this.$n(value)} kWh`;
+                            },
+                            footer: (items) => {
+                                const dataIndex = items[0]?.dataIndex;
+                                if (dataIndex === undefined) {
+                                    return '';
+                                }
+
+                                const total = this.dailyEnergyHistories.reduce((sum, history) => {
+                                    return sum + this.whToKwh(history.data[dataIndex]?.yield_wh || 0);
+                                }, 0);
+                                return `${this.$t('energyhistory.Total')}: ${this.$n(total)} kWh`;
+                            },
+                        },
                     },
                 },
                 scales: {
@@ -620,7 +648,33 @@ export default defineComponent({
                 });
             });
 
+            if (this.isDemoHistoryPeriod()) {
+                const existingTargets = new Set(targets.map((target) => target.id));
+                DemoHistoryTargets.forEach((demoTarget) => {
+                    if (existingTargets.has(demoTarget.id)) {
+                        return;
+                    }
+
+                    const color = colors[targets.length % colors.length] || '#0d6efd';
+                    targets.push({
+                        id: demoTarget.id,
+                        label: demoTarget.label,
+                        color,
+                        data: [],
+                    });
+                });
+            }
+
             return targets;
+        },
+        isDemoHistoryPeriod(): boolean {
+            if (this.query.view === 'day') {
+                return this.query.date.startsWith('2099-06-');
+            }
+            if (this.query.view === 'month') {
+                return this.query.month === '2099-06';
+            }
+            return this.query.year === 2099;
         },
         setView(view: ViewMode) {
             this.query.view = view;
