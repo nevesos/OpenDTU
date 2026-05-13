@@ -236,8 +236,11 @@ endpoint is intentionally limited to one day per request.
 There is no fixed age-based retention for history files. Data is kept
 indefinitely unless LittleFS free space becomes low.
 
-Low-free-space cleanup is allowed to delete only old per-inverter five-minute
-files:
+Low-free-space cleanup runs only when a new history file is about to be
+created. It keeps enough free space for one per-target five-minute day file
+plus 32 KiB reserve before the new file header is written.
+
+Cleanup is allowed to delete only old per-inverter five-minute files:
 
 ```text
 /energy/5m/inv_<serial>_YYYY_MM.eh5

@@ -29,6 +29,9 @@ static constexpr const char* DayDirectory = "/energy/day";
 static constexpr const char* MonthDirectory = "/energy/month";
 static constexpr size_t FileReadBufferSize = 32;
 static constexpr uint16_t MaxRecordsPerAppendBlock = 4;
+static constexpr size_t FiveMinuteDayFileBytes = FileHeaderSize + FiveMinuteSlotsPerDay * (BlockHeaderSize + FiveMinuteRecordSize);
+static constexpr size_t RetentionReserveBytes = 32 * 1024;
+static constexpr size_t RetentionMinimumFreeBytes = FiveMinuteDayFileBytes + RetentionReserveBytes;
 #if defined(ENERGY_HISTORY_MANUAL_PROBE)
 static constexpr const char* EnergyHistoryTag = "EnergyHistory";
 #endif
@@ -425,6 +428,127 @@ bool ensureEnergyDirectories(const uint8_t fileType)
     }
 
     return ensureDirectory(EnergyDirectory) && ensureDirectory(typeDirectory);
+}
+
+size_t littleFsFreeBytes()
+{
+    const size_t total = LittleFS.totalBytes();
+    const size_t used = LittleFS.usedBytes();
+    return total > used ? total - used : 0;
+}
+
+String makePath(const char* directoryPath, const String& fileName)
+{
+    if (fileName.startsWith("/")) {
+        return fileName;
+    }
+
+    return String(directoryPath) + "/" + fileName;
+}
+
+String baseName(const String& path)
+{
+    const int lastSlash = path.lastIndexOf('/');
+    if (lastSlash < 0) {
+        return path;
+    }
+
+    return path.substring(lastSlash + 1);
+}
+
+bool parseRetentionCandidateName(const String& path, uint16_t& year, uint8_t& month)
+{
+    const String name = baseName(path);
+    if (name.length() < 16 || !name.startsWith("inv_") || !name.endsWith(".eh5")) {
+        return false;
+    }
+
+    const int yearSeparator = name.lastIndexOf('_', static_cast<int>(name.length()) - 9);
+    const int monthSeparator = name.lastIndexOf('_');
+    if (yearSeparator <= 4 || monthSeparator <= yearSeparator || monthSeparator + 3 >= name.length()) {
+        return false;
+    }
+
+    const String serial = name.substring(4, yearSeparator);
+    const String yearString = name.substring(yearSeparator + 1, monthSeparator);
+    const String monthString = name.substring(monthSeparator + 1, monthSeparator + 3);
+    if (serial.isEmpty() || yearString.length() != 4 || monthString.length() != 2 || name.substring(monthSeparator + 3) != ".eh5") {
+        return false;
+    }
+
+    for (uint16_t i = 0; i < serial.length(); i++) {
+        if (serial[i] < '0' || serial[i] > '9') {
+            return false;
+        }
+    }
+    for (uint16_t i = 0; i < yearString.length(); i++) {
+        if (yearString[i] < '0' || yearString[i] > '9') {
+            return false;
+        }
+    }
+    for (uint16_t i = 0; i < monthString.length(); i++) {
+        if (monthString[i] < '0' || monthString[i] > '9') {
+            return false;
+        }
+    }
+
+    year = static_cast<uint16_t>(yearString.toInt());
+    month = static_cast<uint8_t>(monthString.toInt());
+    return year >= 2000 && month >= 1 && month <= 12;
+}
+
+bool findOldestRetentionCandidate(String& path)
+{
+    File directory = LittleFS.open(FiveMinuteDirectory, "r", false);
+    if (!directory || !directory.isDirectory()) {
+        return false;
+    }
+
+    bool found = false;
+    uint16_t oldestYear = UINT16_MAX;
+    uint8_t oldestMonth = UINT8_MAX;
+
+    File file = directory.openNextFile();
+    while (file) {
+        if (!file.isDirectory()) {
+            const String candidatePath = makePath(FiveMinuteDirectory, file.name());
+            uint16_t year = 0;
+            uint8_t month = 0;
+            if (parseRetentionCandidateName(candidatePath, year, month)
+                    && (!found || year < oldestYear || (year == oldestYear && month < oldestMonth))) {
+                found = true;
+                oldestYear = year;
+                oldestMonth = month;
+                path = candidatePath;
+            }
+        }
+
+        file = directory.openNextFile();
+    }
+
+    return found;
+}
+
+bool ensureRetentionFreeSpaceForNewFile()
+{
+    while (littleFsFreeBytes() < RetentionMinimumFreeBytes) {
+        String oldestPath;
+        if (!findOldestRetentionCandidate(oldestPath)) {
+            return false;
+        }
+
+        if (!LittleFS.remove(oldestPath)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool isNewHistoryFile(const char* path)
+{
+    File file = LittleFS.open(path, "r", false);
+    return !file || file.size() == 0;
 }
 
 bool writeFull(File& file, const uint8_t* data, const size_t length)
@@ -870,9 +994,19 @@ bool EnergyHistoryClass::appendBlock(const char* path, const FileHeader& expecte
             || payloadSize == 0
             || recordCount == 0
             || expectedHeader.recordSize == 0
-            || payloadSize != recordCount * expectedHeader.recordSize
-            || !ensureEnergyDirectories(expectedHeader.fileType)
-            || !ensureFileHeader(path, expectedHeader)) {
+            || payloadSize != recordCount * expectedHeader.recordSize) {
+        return false;
+    }
+
+    if (!ensureEnergyDirectories(expectedHeader.fileType)) {
+        return false;
+    }
+
+    if (isNewHistoryFile(path) && !ensureRetentionFreeSpaceForNewFile()) {
+        return false;
+    }
+
+    if (!ensureFileHeader(path, expectedHeader)) {
         return false;
     }
 
