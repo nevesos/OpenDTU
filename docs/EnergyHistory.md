@@ -187,6 +187,11 @@ continues so a broken location or twilight configuration does not disable
 history recording. Day and month boundaries are finalized before the night
 check.
 
+Before writing a daytime five-minute sample, all configured poll-enabled
+inverters must have delivered a statistics packet whose `lastUpdate` maps to the
+current local day. This prevents stale `YieldDay` values from the previous day
+from being persisted before the first fresh inverter data arrives.
+
 Daily and monthly aggregates should be append/update-log style where practical.
 If duplicate aggregate records exist, the last valid record for the same key
 wins.

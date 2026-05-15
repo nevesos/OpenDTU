@@ -39,6 +39,47 @@ uint8_t flagsFromState(const bool reachable, const bool producing)
     return flags;
 }
 
+bool lastUpdateIsCurrentLocalDay(const uint32_t lastUpdateMillis, const tm& currentLocalTime)
+{
+    if (lastUpdateMillis == 0) {
+        return false;
+    }
+
+    const time_t now = time(nullptr);
+    const uint32_t ageSeconds = (millis() - lastUpdateMillis) / 1000U;
+    const time_t lastUpdateTime = now - static_cast<time_t>(ageSeconds);
+
+    tm lastUpdateLocalTime = {};
+    localtime_r(&lastUpdateTime, &lastUpdateLocalTime);
+
+    return lastUpdateLocalTime.tm_year == currentLocalTime.tm_year
+            && lastUpdateLocalTime.tm_mon == currentLocalTime.tm_mon
+            && lastUpdateLocalTime.tm_mday == currentLocalTime.tm_mday;
+}
+
+bool allEnabledInvertersHaveCurrentDayStats(const tm& currentLocalTime)
+{
+    bool foundEnabledInverter = false;
+    for (uint8_t i = 0; i < Hoymiles.getNumInverters(); i++) {
+        auto inv = Hoymiles.getInverterByPos(i);
+        if (inv == nullptr) {
+            continue;
+        }
+
+        auto cfg = Configuration.getInverterConfig(inv->serial());
+        if (cfg == nullptr || !cfg->Poll_Enable) {
+            continue;
+        }
+
+        foundEnabledInverter = true;
+        if (!lastUpdateIsCurrentLocalDay(inv->Statistics()->getLastUpdate(), currentLocalTime)) {
+            return false;
+        }
+    }
+
+    return foundEnabledInverter;
+}
+
 } // namespace
 
 void EnergyHistoryClass::loop()
@@ -102,6 +143,10 @@ bool EnergyHistoryClass::persistCurrentFiveMinuteSlot()
         _lastFiveMinuteDay = day;
         _lastFiveMinuteSlot = slot;
         return true;
+    }
+
+    if (!allEnabledInvertersHaveCurrentDayStats(timeinfo)) {
+        return false;
     }
 
     const uint16_t blockIndex = static_cast<uint16_t>((day - 1) * FiveMinuteSlotsPerDay + slot);
