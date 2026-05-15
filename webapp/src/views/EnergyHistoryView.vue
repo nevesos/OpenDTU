@@ -82,6 +82,31 @@
                     <label class="form-label" for="energy-history-year">{{ $t('energyhistory.Year') }}</label>
                     <input id="energy-history-year" v-model.number="query.year" type="number" class="form-control" min="2000" />
                 </div>
+                <div class="col-12 col-lg-auto">
+                    <label class="form-label d-block">{{ $t('energyhistory.Navigate') }}</label>
+                    <div class="energy-history-period-nav">
+                        <button
+                            type="button"
+                            class="btn btn-outline-secondary energy-history-period-arrow"
+                            :title="$t('energyhistory.PreviousPeriod')"
+                            @click="previousPeriod"
+                        >
+                            <BIconChevronLeft />
+                        </button>
+                        <div class="energy-history-period-label">{{ periodNavigationLabel }}</div>
+                        <button
+                            type="button"
+                            class="btn btn-outline-secondary energy-history-period-arrow"
+                            :title="$t('energyhistory.NextPeriod')"
+                            @click="nextPeriod"
+                        >
+                            <BIconChevronRight />
+                        </button>
+                        <button type="button" class="btn btn-outline-primary" @click="resetToCurrentPeriod">
+                            {{ currentPeriodButtonLabel }}
+                        </button>
+                    </div>
+                </div>
                 <div class="col-12 col-md-auto">
                     <button type="submit" class="btn btn-primary" :disabled="historyLoading">
                         <BIconSearch class="me-1" />
@@ -104,12 +129,13 @@
             </div>
             <div class="energy-history-chart mt-4">
                 <ChartComponent
-                    v-if="dailyEnergyHistories.some((history) => history.data.length > 0)"
+                    v-if="!dailyEnergyLoading && dailyEnergyHistories.some((history) => history.data.length > 0)"
                     type="bar"
                     :data="dailyEnergyChartData"
                     :options="dailyEnergyChartOptions"
                     :height="260"
                 />
+                <div v-else-if="dailyEnergyLoading" class="text-center text-muted py-4">{{ $t('base.Loading') }}</div>
                 <div v-else class="text-center text-muted py-4">{{ $t('energyhistory.NoData') }}</div>
             </div>
         </CardElement>
@@ -232,7 +258,7 @@ import CardElement from '@/components/CardElement.vue';
 import InverterTotalInfo from '@/components/InverterTotalInfo.vue';
 import type { Total } from '@/types/LiveDataStatus';
 import { authHeader, handleResponse } from '@/utils/authentication';
-import { BIconSearch } from 'bootstrap-icons-vue';
+import { BIconChevronLeft, BIconChevronRight, BIconSearch } from 'bootstrap-icons-vue';
 import {
     BarElement,
     BarController,
@@ -352,6 +378,8 @@ export default defineComponent({
         BasePage,
         CardElement,
         InverterTotalInfo,
+        BIconChevronLeft,
+        BIconChevronRight,
         BIconSearch,
         ChartComponent,
     },
@@ -359,6 +387,9 @@ export default defineComponent({
         return {
             dataLoading: true,
             historyLoading: false,
+            historyLoadId: 0,
+            dailyEnergyLoading: false,
+            dailyEnergyLoadId: 0,
             status: {} as EnergyHistoryStatus,
             liveTotal: null as Total | null,
             inverters: [] as InverterConfig[],
@@ -403,6 +434,24 @@ export default defineComponent({
             }
             return this.$t('energyhistory.Period');
         },
+        periodNavigationLabel(): string {
+            if (this.query.view === 'day') {
+                return this.parseDateInput(this.query.date).toLocaleDateString(this.$i18n.locale);
+            }
+            if (this.query.view === 'month') {
+                return this.formatMonthName(this.query.month);
+            }
+            return String(this.query.year);
+        },
+        currentPeriodButtonLabel(): string {
+            if (this.query.view === 'day') {
+                return this.$t('energyhistory.Today');
+            }
+            if (this.query.view === 'month') {
+                return this.$t('energyhistory.CurrentMonth');
+            }
+            return this.$t('energyhistory.CurrentYear');
+        },
         showDrillDownBreadcrumb(): boolean {
             return this.drillDownMode && this.query.view !== 'year';
         },
@@ -431,13 +480,16 @@ export default defineComponent({
                 },
             ];
         },
-        chartData(): ChartData<'bar' | 'line', number[], string> {
+        chartData(): ChartData<'bar' | 'line', Array<number | null>, string> {
             const totalHistory = this.histories.find((history) => history.id === 'total');
             const inverterHistories = this.histories.filter((history) => history.id !== 'total' && history.data.length > 0);
+            const fiveMinuteSlots = this.resolution === '5m' ? this.fiveMinuteChartSlots(this.histories) : [];
             const reference = totalHistory && totalHistory.data.length > 0
                 ? totalHistory
                 : this.histories.find((history) => history.data.length > 0);
-            const labels = reference?.data.map((row) => this.firstColumnValue(row).toString()) || [];
+            const labels = this.resolution === '5m'
+                ? fiveMinuteSlots.map((slot) => this.formatSlotTime(slot))
+                : reference?.data.map((row) => this.firstColumnValue(row).toString()) || [];
             const powerKey = this.resolution === '5m' ? 'avg_power_w' : 'max_power_w';
             const totalPowerDataset = totalHistory && totalHistory.data.length > 0
                 ? [{
@@ -445,11 +497,14 @@ export default defineComponent({
                     label: `${this.$t('energyhistory.Total')} ${this.resolution === '5m'
                         ? this.$t('energyhistory.AvgPowerW')
                         : this.$t('energyhistory.MaxPowerW')}`,
-                    data: totalHistory.data.map((row, index) => this.resolution === '5m' ? this.calculateAveragePowerW(row, totalHistory.data, index) : row[powerKey] || 0),
+                    data: this.resolution === '5m'
+                        ? this.fiveMinutePowerData(totalHistory, fiveMinuteSlots)
+                        : totalHistory.data.map((row) => row[powerKey] || 0),
                     borderColor: '#212529',
                     backgroundColor: 'transparent',
                     borderWidth: 3,
                     fill: false,
+                    spanGaps: false,
                     tension: 0.18,
                     pointRadius: this.resolution === '5m' ? 0 : 2,
                     yAxisID: 'power',
@@ -460,11 +515,14 @@ export default defineComponent({
                 label: `${history.label} ${this.resolution === '5m'
                     ? this.$t('energyhistory.AvgPowerW')
                     : this.$t('energyhistory.MaxPowerW')}`,
-                data: history.data.map((row, index) => this.resolution === '5m' ? this.calculateAveragePowerW(row, history.data, index) : row[powerKey] || 0),
+                data: this.resolution === '5m'
+                    ? this.fiveMinutePowerData(history, fiveMinuteSlots)
+                    : history.data.map((row) => row[powerKey] || 0),
                 borderColor: history.color,
                 backgroundColor: this.withAlpha(history.color, 0.18),
                 borderWidth: 2,
                 fill: true,
+                spanGaps: false,
                 tension: 0.25,
                 pointRadius: this.resolution === '5m' ? 0 : 2,
                 yAxisID: 'power',
@@ -473,11 +531,14 @@ export default defineComponent({
                 ? [{
                     type: 'line' as const,
                     label: this.$t('energyhistory.CumulativeEnergyKwh'),
-                    data: this.cumulativeEnergyData(totalHistory.data),
+                    data: this.resolution === '5m'
+                        ? this.fiveMinuteEnergyData(totalHistory, fiveMinuteSlots)
+                        : this.cumulativeEnergyData(totalHistory.data),
                     borderColor: totalHistory.color,
                     backgroundColor: 'transparent',
                     borderWidth: 3,
                     fill: false,
+                    spanGaps: false,
                     tension: 0.18,
                     pointRadius: this.resolution === '5m' ? 0 : 2,
                     yAxisID: 'energy',
@@ -626,7 +687,11 @@ export default defineComponent({
     methods: {
         reloadAll() {
             this.dataLoading = true;
-            Promise.all([this.loadStatus(), this.loadLiveTotal(), this.loadInverters()])
+            this.loadStatus().catch(() => {
+                this.status = {};
+            });
+            this.loadLiveTotal();
+            this.loadInverters()
                 .then(() => this.loadHistory())
                 .finally(() => {
                 this.dataLoading = false;
@@ -662,29 +727,67 @@ export default defineComponent({
                 });
         },
         loadHistory() {
+            const loadId = ++this.historyLoadId;
             this.historyLoading = true;
             const targets = this.historyTargets();
-            return Promise.all([
-                Promise.all(targets.map((target) => this.loadTargetHistory(target))),
-                this.loadDailyEnergyHistory(),
-            ])
-                .then(([histories]) => {
-                    this.histories = histories;
-                })
+            this.histories = targets.map((target) => ({
+                ...target,
+                data: [],
+            }));
+            this.dailyEnergyHistories = [];
+            this.dailyEnergyLoadId++;
+            this.dailyEnergyLoading = true;
+
+            const requests = targets.map((target, index) => this.loadTargetHistory(target)
+                .then((histories) => {
+                    if (loadId !== this.historyLoadId) {
+                        return histories;
+                    }
+
+                    const nextHistories = this.histories.slice();
+                    nextHistories[index] = histories;
+                    this.histories = nextHistories;
+                    return histories;
+                }));
+
+            Promise.all(requests)
+                .then(() => {
+                    if (loadId !== this.historyLoadId) {
+                        return;
+                    }
+
+                    this.loadDailyEnergyHistory();
+                });
+
+            return (requests[0] || Promise.resolve())
+                .then(() => undefined)
                 .finally(() => {
-                    this.historyLoading = false;
+                    if (loadId === this.historyLoadId) {
+                        this.historyLoading = false;
+                    }
                 });
         },
         loadDailyEnergyHistory(): Promise<void> {
+            const loadId = ++this.dailyEnergyLoadId;
             const range = this.currentMonthDayRange();
             const targets = this.historyTargets().filter((target) => target.id !== 'total');
+            this.dailyEnergyLoading = true;
 
             return Promise.all(targets.map((target) => this.loadDailyEnergyTargetHistory(target, range)))
                 .then((histories) => {
-                    this.dailyEnergyHistories = histories;
+                    if (loadId === this.dailyEnergyLoadId) {
+                        this.dailyEnergyHistories = histories;
+                    }
                 })
                 .catch(() => {
-                    this.dailyEnergyHistories = [];
+                    if (loadId === this.dailyEnergyLoadId) {
+                        this.dailyEnergyHistories = [];
+                    }
+                })
+                .finally(() => {
+                    if (loadId === this.dailyEnergyLoadId) {
+                        this.dailyEnergyLoading = false;
+                    }
                 });
         },
         loadDailyEnergyTargetHistory(target: EnergyHistorySeries, range: { year: number; from: number; to: number }): Promise<EnergyHistorySeries> {
@@ -808,6 +911,39 @@ export default defineComponent({
             this.query.view = view;
             this.loadHistory();
         },
+        previousPeriod() {
+            this.shiftPeriod(-1);
+        },
+        nextPeriod() {
+            this.shiftPeriod(1);
+        },
+        shiftPeriod(direction: number) {
+            this.drillDownMode = false;
+            if (this.query.view === 'day') {
+                const date = this.parseDateInput(this.query.date);
+                date.setDate(date.getDate() + direction);
+                this.query.date = localDateInputValue(date);
+            } else if (this.query.view === 'month') {
+                const date = this.parseMonthInput(this.query.month);
+                date.setMonth(date.getMonth() + direction);
+                this.query.month = localMonthInputValue(date);
+            } else {
+                this.query.year += direction;
+            }
+            this.loadHistory();
+        },
+        resetToCurrentPeriod() {
+            const now = new Date();
+            this.drillDownMode = false;
+            if (this.query.view === 'day') {
+                this.query.date = localDateInputValue(now);
+            } else if (this.query.view === 'month') {
+                this.query.month = localMonthInputValue(now);
+            } else {
+                this.query.year = now.getFullYear();
+            }
+            this.loadHistory();
+        },
         canDrillDown(row: EnergyHistoryRow): boolean {
             if (this.resolution === '5m') {
                 return false;
@@ -842,9 +978,27 @@ export default defineComponent({
             this.loadHistory();
         },
         formatMonthName(monthStr: string): string {
-            const [year, month] = monthStr.split('-');
-            const date = new Date(parseInt(year), parseInt(month) - 1);
+            const date = this.parseMonthInput(monthStr);
             return date.toLocaleDateString(this.$i18n.locale, { month: 'long', year: 'numeric' });
+        },
+        parseDateInput(value: string): Date {
+            const parts = value.split('-');
+            const year = Number(parts[0]);
+            const month = Number(parts[1]);
+            const day = Number(parts[2]);
+            if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+                return new Date();
+            }
+            return new Date(year, month - 1, day);
+        },
+        parseMonthInput(value: string): Date {
+            const parts = value.split('-');
+            const year = Number(parts[0]);
+            const month = Number(parts[1]);
+            if (!Number.isFinite(year) || !Number.isFinite(month)) {
+                return new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+            }
+            return new Date(year, month - 1, 1);
         },
         firstColumnValue(row: EnergyHistoryRow): string | number {
             if (this.resolution === '5m') {
@@ -915,6 +1069,46 @@ export default defineComponent({
                 return this.whToKwh(cumulative);
             });
         },
+        fiveMinuteChartSlots(histories: EnergyHistorySeries[]): number[] {
+            const presentSlots = histories
+                .flatMap((history) => history.data)
+                .map((row) => row.slot)
+                .filter((slot): slot is number => slot !== undefined);
+            if (presentSlots.length === 0) {
+                return [];
+            }
+
+            const firstSlot = Math.max(0, Math.min(...presentSlots));
+            const lastSlot = Math.min(287, Math.max(...presentSlots));
+            const slots: number[] = [];
+            for (let slot = firstSlot; slot <= lastSlot; slot++) {
+                slots.push(slot);
+            }
+            return slots;
+        },
+        fiveMinutePowerData(history: EnergyHistorySeries, slots: number[]): Array<number | null> {
+            const bySlot = this.rowsBySlot(history.data);
+            return slots.map((slot) => {
+                const entry = bySlot.get(slot);
+                return entry ? this.calculateAveragePowerW(entry.row, history.data, entry.index) : null;
+            });
+        },
+        fiveMinuteEnergyData(history: EnergyHistorySeries, slots: number[]): Array<number | null> {
+            const bySlot = this.rowsBySlot(history.data);
+            return slots.map((slot) => {
+                const entry = bySlot.get(slot);
+                return entry ? this.whToKwh(entry.row.yield_wh || 0) : null;
+            });
+        },
+        rowsBySlot(rows: EnergyHistoryRow[]): Map<number, { row: EnergyHistoryRow; index: number }> {
+            const result = new Map<number, { row: EnergyHistoryRow; index: number }>();
+            rows.forEach((row, index) => {
+                if (row.slot !== undefined) {
+                    result.set(row.slot, { row, index });
+                }
+            });
+            return result;
+        },
         whToKwh(value: number): number {
             return value / 1000;
         },
@@ -941,13 +1135,32 @@ export default defineComponent({
             return `${(value / 1024 / 1024).toFixed(1)} MiB`;
         },
         calculateAveragePowerW(row: EnergyHistoryRow, rows: EnergyHistoryRow[], index: number): number {
-            // Korrigierte Leistungsberechnung basierend auf tatsächlichem Zeitraum zwischen Datenpunkten
             if (index === 0) {
                 return row.avg_power_w || 0;
             }
 
-            const prevRow = rows[index - 1];
             const currentYield = row.yield_wh || 0;
+            let prevRow = rows[index - 1];
+
+            if (this.resolution === '5m' && currentYield > 0) {
+                for (let i = index - 1; i >= 0; i--) {
+                    const candidate = rows[i];
+                    if (!candidate || candidate.slot === undefined) {
+                        continue;
+                    }
+
+                    const candidateYield = candidate.yield_wh || 0;
+                    if (candidateYield > 0 && candidateYield < currentYield) {
+                        prevRow = candidate;
+                        break;
+                    }
+                }
+            }
+
+            if (!prevRow) {
+                return row.avg_power_w || 0;
+            }
+
             const prevYield = prevRow.yield_wh || 0;
             const yieldDelta = currentYield - prevYield;
 
@@ -955,46 +1168,26 @@ export default defineComponent({
                 return 0;
             }
 
-            // Berechne Zeit-Differenz je nach Resolution
-            let timeDeltaMinutes = 5; // Default fuer 5-Minuten-Slots
+            let timeDeltaMinutes = 5;
 
             if (this.resolution === '5m' && row.slot !== undefined && prevRow.slot !== undefined) {
-                // Slots sind 5-Minuten-Intervalle
-                // Bei Uebergaengen ueber Tagesgrenze (von slot 287 zu slot 0 des naechsten Tages)
                 let slotDelta = row.slot - prevRow.slot;
                 if (slotDelta < 0) {
-                    slotDelta = (288 - prevRow.slot) + row.slot; // Uebergangszaehlung
+                    slotDelta = (288 - prevRow.slot) + row.slot;
                 }
                 timeDeltaMinutes = slotDelta * 5;
             } else if (this.resolution === 'day' && row.day_of_year !== undefined && prevRow.day_of_year !== undefined) {
-                // Tages-Unterschied (in Minuten fuer Konsistenz)
                 timeDeltaMinutes = (row.day_of_year - prevRow.day_of_year) * 24 * 60;
             } else if (this.resolution === 'month' && row.month !== undefined && prevRow.month !== undefined) {
-                // Monatlicher Unterschied (vereinfacht als durchschnittlich 30 Tage)
                 timeDeltaMinutes = (row.month - prevRow.month) * 30 * 24 * 60;
             }
 
-            // Berechne durchschnittliche Leistung
-            // yieldDelta ist in Wh, timeDeltaMinutes ist in Minuten
-            // avg_power_w = yieldDelta (Wh) / (timeDeltaMinutes / 60) (Stunden)
-            // avg_power_w = yieldDelta * 60 / timeDeltaMinutes
             if (timeDeltaMinutes <= 0) {
                 return 0;
             }
 
             const avgPowerW = (yieldDelta * 60) / timeDeltaMinutes;
             return Math.round(avgPowerW);
-        },
-    },
-    watch: {
-        'query.date'() {
-            this.loadDailyEnergyHistory();
-        },
-        'query.month'() {
-            this.loadDailyEnergyHistory();
-        },
-        'query.year'() {
-            this.loadDailyEnergyHistory();
         },
     },
 });
@@ -1004,6 +1197,36 @@ export default defineComponent({
 .energy-history-chart {
     position: relative;
     min-height: 320px;
+}
+
+.energy-history-period-nav {
+    display: grid;
+    grid-template-columns: 2.4rem minmax(9rem, 1fr) 2.4rem auto;
+    gap: 0.5rem;
+    align-items: center;
+    min-width: min(100%, 24rem);
+}
+
+.energy-history-period-arrow {
+    width: 2.4rem;
+    height: 2.4rem;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.energy-history-period-label {
+    min-height: 2.4rem;
+    padding: 0.375rem 0.75rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--bs-border-color);
+    border-radius: var(--bs-border-radius);
+    background: var(--bs-body-bg);
+    font-weight: 600;
+    white-space: nowrap;
 }
 
 .energy-history-row-totals,
@@ -1071,6 +1294,14 @@ export default defineComponent({
         flex-basis: 100%;
         min-width: 100%;
         max-width: none;
+    }
+
+    .energy-history-period-nav {
+        grid-template-columns: 2.4rem minmax(0, 1fr) 2.4rem;
+    }
+
+    .energy-history-period-nav .btn-outline-primary {
+        grid-column: 1 / -1;
     }
 }
 
