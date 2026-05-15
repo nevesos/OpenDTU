@@ -11,6 +11,35 @@
         </div>
 
         <CardElement :text="$t('energyhistory.Query')" textVariant="text-bg-primary" add-space>
+            <!-- Breadcrumb Navigation -->
+            <div class="mb-3" v-if="showDrillDownBreadcrumb">
+                <nav aria-label="breadcrumb">
+                    <ol class="breadcrumb mb-0">
+                        <li class="breadcrumb-item">
+                            <button
+                                type="button"
+                                class="btn btn-link p-0 text-decoration-none"
+                                @click="resetToDrillDown('year')"
+                            >
+                                {{ new Date().getFullYear() }}
+                            </button>
+                        </li>
+                        <li class="breadcrumb-item" v-if="query.view === 'month' || query.view === 'day'">
+                            <button
+                                type="button"
+                                class="btn btn-link p-0 text-decoration-none"
+                                @click="resetToDrillDown('month')"
+                            >
+                                {{ formatMonthName(query.month) }}
+                            </button>
+                        </li>
+                        <li class="breadcrumb-item active" v-if="query.view === 'day'">
+                            {{ new Date(query.date).toLocaleDateString() }}
+                        </li>
+                    </ol>
+                </nav>
+            </div>
+
             <form class="row g-3 align-items-end" @submit.prevent="loadHistory">
                 <div class="col-12 col-md-auto">
                     <label class="form-label d-block">{{ $t('energyhistory.Period') }}</label>
@@ -96,6 +125,54 @@
         </div>
 
         <CardElement :text="$t('energyhistory.Results')" textVariant="text-bg-primary" add-space table>
+            <!-- Metadata Info -->
+            <div class="row g-2 mb-3 px-3" v-if="activeHistory.metadata">
+                <div class="col-12 col-md-6">
+                    <div class="card border-0 bg-light">
+                        <div class="card-body py-2 px-3">
+                            <div class="row g-2 small">
+                                <div class="col-auto">
+                                    <strong>{{ $t('energyhistory.Target') }}:</strong>
+                                    <span class="ms-2">{{ activeHistory.metadata.target }}</span>
+                                </div>
+                                <div class="col-auto">
+                                    <strong>{{ $t('energyhistory.Resolution') }}:</strong>
+                                    <span class="ms-2">{{ activeHistory.metadata.resolution }}</span>
+                                </div>
+                                <div class="col-auto" v-if="activeHistory.metadata.date">
+                                    <strong>{{ $t('energyhistory.Date') }}:</strong>
+                                    <span class="ms-2">{{ activeHistory.metadata.date }}</span>
+                                </div>
+                                <div class="col-auto" v-if="activeHistory.metadata.year">
+                                    <strong>{{ $t('energyhistory.Year') }}:</strong>
+                                    <span class="ms-2">{{ activeHistory.metadata.year }}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-12 col-md-6">
+                    <div class="card border-0 bg-light">
+                        <div class="card-body py-2 px-3">
+                            <div class="row g-2 small">
+                                <div class="col-auto" v-if="activeHistory.metadata.from !== undefined && activeHistory.metadata.to !== undefined">
+                                    <strong>Range:</strong>
+                                    <span class="ms-2">{{ activeHistory.metadata.from }} - {{ activeHistory.metadata.to }}</span>
+                                </div>
+                                <div class="col-auto" v-if="activeHistory.metadata.interval_sec">
+                                    <strong>{{ $t('energyhistory.Interval') }}:</strong>
+                                    <span class="ms-2">{{ activeHistory.metadata.interval_sec }}s</span>
+                                </div>
+                                <div class="col-auto" v-if="activeHistory.metadata.count !== undefined">
+                                    <strong>{{ $t('energyhistory.Count') }}:</strong>
+                                    <span class="ms-2">{{ activeHistory.metadata.count }}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <div class="table-responsive">
                 <table class="table table-hover table-condensed align-middle">
                     <thead>
@@ -112,12 +189,21 @@
                         </tr>
                     </thead>
                     <tbody>
-                        <tr v-for="(row, index) in activeHistory.data" :key="index">
-                            <td>{{ firstColumnValue(row) }}</td>
+                        <tr
+                            v-for="(row, index) in activeHistory.data"
+                            :key="index"
+                            :style="canDrillDown(row) ? 'cursor: pointer;' : ''"
+                            @click="canDrillDown(row) && drillDown(row)"
+                            :class="canDrillDown(row) ? 'table-active' : ''"
+                        >
+                            <td>
+                                <span v-if="canDrillDown(row)" class="me-2">➜</span>
+                                {{ firstColumnValue(row) }}
+                            </td>
                             <td>{{ formatKwh(row.yield_wh || 0) }}</td>
-                            <td v-if="resolution === '5m'">{{ $n(row.avg_power_w || 0) }}</td>
+                            <td v-if="resolution === '5m'">{{ $n(calculateAveragePowerW(row, activeHistory.data, index)) }}</td>
                             <td v-if="resolution !== '5m'">{{ $n(row.max_power_w || 0) }}</td>
-                            <td v-if="resolution !== '5m'">{{ $n(row.avg_power_w || 0) }}</td>
+                            <td v-if="resolution !== '5m'">{{ $n(calculateAveragePowerW(row, activeHistory.data, index)) }}</td>
                             <td v-if="resolution !== '5m'">{{ $n(row.runtime_min || 0) }}</td>
                             <td v-if="resolution === 'day'">{{ $n(row.sample_count || 0) }}</td>
                             <td v-if="resolution === 'month'">{{ $n(row.day_count || 0) }}</td>
@@ -195,6 +281,13 @@ interface EnergyHistoryRow {
 
 interface EnergyHistoryResponse {
     target?: string;
+    resolution?: string;
+    date?: string;
+    year?: number;
+    from?: number;
+    to?: number;
+    interval_sec?: number;
+    count?: number;
     data: EnergyHistoryRow[];
     scan?: {
         valid_blocks?: number;
@@ -209,6 +302,16 @@ interface EnergyHistorySeries {
     color: string;
     data: EnergyHistoryRow[];
     scan?: EnergyHistoryResponse['scan'];
+    metadata?: {
+        target?: string;
+        resolution?: string;
+        date?: string;
+        year?: number;
+        from?: number;
+        to?: number;
+        interval_sec?: number;
+        count?: number;
+    };
 }
 
 interface InverterConfig {
@@ -261,6 +364,7 @@ export default defineComponent({
             inverters: [] as InverterConfig[],
             histories: [] as EnergyHistorySeries[],
             dailyEnergyHistories: [] as EnergyHistorySeries[],
+            drillDownMode: false,
             query: {
                 view: 'day' as ViewMode,
                 date: localDateInputValue(),
@@ -298,6 +402,9 @@ export default defineComponent({
                 return this.$t('energyhistory.Date');
             }
             return this.$t('energyhistory.Period');
+        },
+        showDrillDownBreadcrumb(): boolean {
+            return this.drillDownMode && this.query.view !== 'year';
         },
         statusTiles(): { label: string; value: string; detail?: string }[] {
             return [
@@ -338,7 +445,7 @@ export default defineComponent({
                     label: `${this.$t('energyhistory.Total')} ${this.resolution === '5m'
                         ? this.$t('energyhistory.AvgPowerW')
                         : this.$t('energyhistory.MaxPowerW')}`,
-                    data: totalHistory.data.map((row) => row[powerKey] || 0),
+                    data: totalHistory.data.map((row, index) => this.resolution === '5m' ? this.calculateAveragePowerW(row, totalHistory.data, index) : row[powerKey] || 0),
                     borderColor: '#212529',
                     backgroundColor: 'transparent',
                     borderWidth: 3,
@@ -353,7 +460,7 @@ export default defineComponent({
                 label: `${history.label} ${this.resolution === '5m'
                     ? this.$t('energyhistory.AvgPowerW')
                     : this.$t('energyhistory.MaxPowerW')}`,
-                data: history.data.map((row) => row[powerKey] || 0),
+                data: history.data.map((row, index) => this.resolution === '5m' ? this.calculateAveragePowerW(row, history.data, index) : row[powerKey] || 0),
                 borderColor: history.color,
                 backgroundColor: this.withAlpha(history.color, 0.18),
                 borderWidth: 2,
@@ -594,6 +701,16 @@ export default defineComponent({
                     ...target,
                     data: data.data || [],
                     scan: data.scan,
+                    metadata: {
+                        target: data.target,
+                        resolution: data.resolution,
+                        date: data.date,
+                        year: data.year,
+                        from: data.from,
+                        to: data.to,
+                        interval_sec: data.interval_sec,
+                        count: data.count,
+                    },
                 }))
                 .catch(() => ({
                     ...target,
@@ -623,6 +740,16 @@ export default defineComponent({
                     ...target,
                     data: data.data || [],
                     scan: data.scan,
+                    metadata: {
+                        target: data.target,
+                        resolution: data.resolution,
+                        date: data.date,
+                        year: data.year,
+                        from: data.from,
+                        to: data.to,
+                        interval_sec: data.interval_sec,
+                        count: data.count,
+                    },
                 }))
                 .catch(() => ({
                     ...target,
@@ -677,8 +804,47 @@ export default defineComponent({
             return this.query.year === 2099;
         },
         setView(view: ViewMode) {
+            this.drillDownMode = false;
             this.query.view = view;
             this.loadHistory();
+        },
+        canDrillDown(row: EnergyHistoryRow): boolean {
+            if (this.resolution === '5m') {
+                return false;
+            }
+            if (this.resolution === 'day' && row.day_of_year !== undefined) {
+                return true;
+            }
+            if (this.resolution === 'month' && row.month !== undefined) {
+                return true;
+            }
+            return false;
+        },
+        drillDown(row: EnergyHistoryRow) {
+            if (this.resolution === 'month' && row.month !== undefined) {
+                this.drillDownMode = true;
+                const monthStr = String(row.month).padStart(2, '0');
+                this.query.month = `${this.query.year}-${monthStr}`;
+                this.query.view = 'month';
+                this.loadHistory();
+            } else if (this.resolution === 'day' && row.day_of_year !== undefined) {
+                this.drillDownMode = true;
+                const year = this.monthDayRange(this.query.month).year;
+                const date = this.formatDayOfYear(year, row.day_of_year);
+                this.query.date = date;
+                this.query.view = 'day';
+                this.loadHistory();
+            }
+        },
+        resetToDrillDown(view: ViewMode) {
+            this.drillDownMode = true;
+            this.query.view = view;
+            this.loadHistory();
+        },
+        formatMonthName(monthStr: string): string {
+            const [year, month] = monthStr.split('-');
+            const date = new Date(parseInt(year), parseInt(month) - 1);
+            return date.toLocaleDateString(this.$i18n.locale, { month: 'long', year: 'numeric' });
         },
         firstColumnValue(row: EnergyHistoryRow): string | number {
             if (this.resolution === '5m') {
@@ -774,6 +940,51 @@ export default defineComponent({
             }
             return `${(value / 1024 / 1024).toFixed(1)} MiB`;
         },
+        calculateAveragePowerW(row: EnergyHistoryRow, rows: EnergyHistoryRow[], index: number): number {
+            // Korrigierte Leistungsberechnung basierend auf tatsächlichem Zeitraum zwischen Datenpunkten
+            if (index === 0) {
+                return row.avg_power_w || 0;
+            }
+
+            const prevRow = rows[index - 1];
+            const currentYield = row.yield_wh || 0;
+            const prevYield = prevRow.yield_wh || 0;
+            const yieldDelta = currentYield - prevYield;
+
+            if (yieldDelta <= 0) {
+                return 0;
+            }
+
+            // Berechne Zeit-Differenz je nach Resolution
+            let timeDeltaMinutes = 5; // Default fuer 5-Minuten-Slots
+
+            if (this.resolution === '5m' && row.slot !== undefined && prevRow.slot !== undefined) {
+                // Slots sind 5-Minuten-Intervalle
+                // Bei Uebergaengen ueber Tagesgrenze (von slot 287 zu slot 0 des naechsten Tages)
+                let slotDelta = row.slot - prevRow.slot;
+                if (slotDelta < 0) {
+                    slotDelta = (288 - prevRow.slot) + row.slot; // Uebergangszaehlung
+                }
+                timeDeltaMinutes = slotDelta * 5;
+            } else if (this.resolution === 'day' && row.day_of_year !== undefined && prevRow.day_of_year !== undefined) {
+                // Tages-Unterschied (in Minuten fuer Konsistenz)
+                timeDeltaMinutes = (row.day_of_year - prevRow.day_of_year) * 24 * 60;
+            } else if (this.resolution === 'month' && row.month !== undefined && prevRow.month !== undefined) {
+                // Monatlicher Unterschied (vereinfacht als durchschnittlich 30 Tage)
+                timeDeltaMinutes = (row.month - prevRow.month) * 30 * 24 * 60;
+            }
+
+            // Berechne durchschnittliche Leistung
+            // yieldDelta ist in Wh, timeDeltaMinutes ist in Minuten
+            // avg_power_w = yieldDelta (Wh) / (timeDeltaMinutes / 60) (Stunden)
+            // avg_power_w = yieldDelta * 60 / timeDeltaMinutes
+            if (timeDeltaMinutes <= 0) {
+                return 0;
+            }
+
+            const avgPowerW = (yieldDelta * 60) / timeDeltaMinutes;
+            return Math.round(avgPowerW);
+        },
     },
     watch: {
         'query.date'() {
@@ -861,5 +1072,23 @@ export default defineComponent({
         min-width: 100%;
         max-width: none;
     }
+}
+
+/* Drill-down Navigation Styles */
+.table tbody tr[style*="cursor"] {
+    transition: background-color 0.15s ease-in-out;
+}
+
+.table tbody tr[style*="cursor"]:hover {
+    background-color: rgba(13, 110, 253, 0.1);
+}
+
+.breadcrumb {
+    font-size: 0.9rem;
+}
+
+.breadcrumb .btn-link {
+    font-size: inherit;
+    line-height: 1.5;
 }
 </style>
