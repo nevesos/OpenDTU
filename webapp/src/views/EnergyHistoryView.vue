@@ -150,113 +150,7 @@
             </div>
         </div>
 
-        <EnergyHistoryImportExport @changed="reloadAfterFileChange" @selected="selectedHistoryFile = $event" />
-
-        <CardElement :text="$t('energyhistory.Results')" textVariant="text-bg-primary" add-space table>
-            <div class="px-3 pb-3" v-if="selectedHistoryFile">
-                <div class="small text-muted">{{ $t('energyhistory.SelectedFile') }}</div>
-                <div class="fw-semibold text-break">{{ selectedHistoryFile.path }}</div>
-                <div class="small text-muted">{{ formatBytes(selectedHistoryFile.size) }}</div>
-            </div>
-
-            <!-- Metadata Info -->
-            <div class="row g-2 mb-3 px-3" v-if="activeHistory.metadata">
-                <div class="col-12 col-md-6">
-                    <div class="card border-0 bg-light">
-                        <div class="card-body py-2 px-3">
-                            <div class="row g-2 small">
-                                <div class="col-auto">
-                                    <strong>{{ $t('energyhistory.Target') }}:</strong>
-                                    <span class="ms-2">{{ activeHistory.metadata.target }}</span>
-                                </div>
-                                <div class="col-auto">
-                                    <strong>{{ $t('energyhistory.Resolution') }}:</strong>
-                                    <span class="ms-2">{{ activeHistory.metadata.resolution }}</span>
-                                </div>
-                                <div class="col-auto" v-if="activeHistory.metadata.date">
-                                    <strong>{{ $t('energyhistory.Date') }}:</strong>
-                                    <span class="ms-2">{{ activeHistory.metadata.date }}</span>
-                                </div>
-                                <div class="col-auto" v-if="activeHistory.metadata.year">
-                                    <strong>{{ $t('energyhistory.Year') }}:</strong>
-                                    <span class="ms-2">{{ activeHistory.metadata.year }}</span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-12 col-md-6">
-                    <div class="card border-0 bg-light">
-                        <div class="card-body py-2 px-3">
-                            <div class="row g-2 small">
-                                <div class="col-auto" v-if="activeHistory.metadata.from !== undefined && activeHistory.metadata.to !== undefined">
-                                    <strong>Range:</strong>
-                                    <span class="ms-2">{{ activeHistory.metadata.from }} - {{ activeHistory.metadata.to }}</span>
-                                </div>
-                                <div class="col-auto" v-if="activeHistory.metadata.interval_sec">
-                                    <strong>{{ $t('energyhistory.Interval') }}:</strong>
-                                    <span class="ms-2">{{ activeHistory.metadata.interval_sec }}s</span>
-                                </div>
-                                <div class="col-auto" v-if="activeHistory.metadata.count !== undefined">
-                                    <strong>{{ $t('energyhistory.Count') }}:</strong>
-                                    <span class="ms-2">{{ activeHistory.metadata.count }}</span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="table-responsive">
-                <table class="table table-hover table-condensed align-middle">
-                    <thead>
-                        <tr>
-                            <th>{{ firstColumnLabel }}</th>
-                            <th>{{ $t('energyhistory.YieldWh') }}</th>
-                            <th v-if="resolution === '5m'">{{ $t('energyhistory.AvgPowerW') }}</th>
-                            <th v-if="resolution !== '5m'">{{ $t('energyhistory.MaxPowerW') }}</th>
-                            <th v-if="resolution !== '5m'">{{ $t('energyhistory.AvgPowerW') }}</th>
-                            <th v-if="resolution !== '5m'">{{ $t('energyhistory.RuntimeMin') }}</th>
-                            <th v-if="resolution === 'day'">{{ $t('energyhistory.SampleCount') }}</th>
-                            <th v-if="resolution === 'month'">{{ $t('energyhistory.DayCount') }}</th>
-                            <th v-if="resolution !== '5m'">{{ $t('energyhistory.Flags') }}</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr
-                            v-for="(row, index) in activeHistory.data"
-                            :key="index"
-                            :style="canDrillDown(row) ? 'cursor: pointer;' : ''"
-                            @click="canDrillDown(row) && drillDown(row)"
-                            :class="canDrillDown(row) ? 'table-active' : ''"
-                        >
-                            <td>
-                                <span v-if="canDrillDown(row)" class="me-2">➜</span>
-                                {{ firstColumnValue(row) }}
-                            </td>
-                            <td>{{ formatKwh(row.yield_wh || 0) }}</td>
-                            <td v-if="resolution === '5m'">{{ $n(calculateAveragePowerW(row, activeHistory.data, index)) }}</td>
-                            <td v-if="resolution !== '5m'">{{ $n(row.max_power_w || 0) }}</td>
-                            <td v-if="resolution !== '5m'">{{ $n(calculateAveragePowerW(row, activeHistory.data, index)) }}</td>
-                            <td v-if="resolution !== '5m'">{{ $n(row.runtime_min || 0) }}</td>
-                            <td v-if="resolution === 'day'">{{ $n(row.sample_count || 0) }}</td>
-                            <td v-if="resolution === 'month'">{{ $n(row.day_count || 0) }}</td>
-                            <td v-if="resolution !== '5m'">{{ row.flags }}</td>
-                        </tr>
-                        <tr v-if="!historyLoading && activeHistory.data.length === 0">
-                            <td colspan="8" class="text-center text-muted">{{ $t('energyhistory.NoData') }}</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-            <div class="small text-muted px-3 pb-3" v-if="activeHistory.scan">
-                {{ $t('energyhistory.ScanSummary', {
-                    blocks: activeHistory.scan.valid_blocks || 0,
-                    skipped: activeHistory.scan.skipped_blocks || 0,
-                    records: activeHistory.scan.valid_records || 0,
-                }) }}
-            </div>
-        </CardElement>
+        <EnergyHistoryImportExport @changed="reloadAfterFileChange" />
     </BasePage>
 </template>
 
@@ -360,11 +254,6 @@ interface InverterListResponse {
     inverter?: InverterConfig[];
 }
 
-interface EnergyHistoryFile {
-    path: string;
-    size: number;
-}
-
 function localDateInputValue(date = new Date()): string {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -406,7 +295,6 @@ export default defineComponent({
             dailyEnergyLoading: false,
             dailyEnergyLoadId: 0,
             status: {} as EnergyHistoryStatus,
-            selectedHistoryFile: null as EnergyHistoryFile | null,
             liveTotal: null as Total | null,
             inverters: [] as InverterConfig[],
             histories: [] as EnergyHistorySeries[],
@@ -430,25 +318,8 @@ export default defineComponent({
             }
             return 'month';
         },
-        activeHistory(): EnergyHistorySeries {
-            return this.histories.find((history) => history.id === 'total') || {
-                id: 'total',
-                label: 'total',
-                color: '#198754',
-                data: [],
-            };
-        },
         chartHasData(): boolean {
             return this.histories.some((history) => history.data.length > 0);
-        },
-        firstColumnLabel(): string {
-            if (this.resolution === '5m') {
-                return this.$t('energyhistory.Time');
-            }
-            if (this.resolution === 'day') {
-                return this.$t('energyhistory.Date');
-            }
-            return this.$t('energyhistory.Period');
         },
         periodNavigationLabel(): string {
             if (this.query.view === 'day') {
@@ -963,34 +834,6 @@ export default defineComponent({
                 this.query.year = now.getFullYear();
             }
             this.loadHistory();
-        },
-        canDrillDown(row: EnergyHistoryRow): boolean {
-            if (this.resolution === '5m') {
-                return false;
-            }
-            if (this.resolution === 'day' && row.day_of_year !== undefined) {
-                return true;
-            }
-            if (this.resolution === 'month' && row.month !== undefined) {
-                return true;
-            }
-            return false;
-        },
-        drillDown(row: EnergyHistoryRow) {
-            if (this.resolution === 'month' && row.month !== undefined) {
-                this.drillDownMode = true;
-                const monthStr = String(row.month).padStart(2, '0');
-                this.query.month = `${this.query.year}-${monthStr}`;
-                this.query.view = 'month';
-                this.loadHistory();
-            } else if (this.resolution === 'day' && row.day_of_year !== undefined) {
-                this.drillDownMode = true;
-                const year = this.monthDayRange(this.query.month).year;
-                const date = this.formatDayOfYear(year, row.day_of_year);
-                this.query.date = date;
-                this.query.view = 'day';
-                this.loadHistory();
-            }
         },
         resetToDrillDown(view: ViewMode) {
             this.drillDownMode = true;
