@@ -763,6 +763,7 @@
         "UploadFailed": "Echec du televersement du fichier d'historique",
         "FilePath": "Fichier",
         "FileSize": "Taille",
+        "SelectedFile": "Fichier selectionne",
         "Download": "Telecharger",
         "DownloadFailed": "Echec du telechargement du fichier d'historique",
         "NoFiles": "Aucun fichier d'historique",

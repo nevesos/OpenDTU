@@ -150,9 +150,15 @@
             </div>
         </div>
 
-        <EnergyHistoryImportExport @changed="reloadAfterFileChange" />
+        <EnergyHistoryImportExport @changed="reloadAfterFileChange" @selected="selectedHistoryFile = $event" />
 
         <CardElement :text="$t('energyhistory.Results')" textVariant="text-bg-primary" add-space table>
+            <div class="px-3 pb-3" v-if="selectedHistoryFile">
+                <div class="small text-muted">{{ $t('energyhistory.SelectedFile') }}</div>
+                <div class="fw-semibold text-break">{{ selectedHistoryFile.path }}</div>
+                <div class="small text-muted">{{ formatBytes(selectedHistoryFile.size) }}</div>
+            </div>
+
             <!-- Metadata Info -->
             <div class="row g-2 mb-3 px-3" v-if="activeHistory.metadata">
                 <div class="col-12 col-md-6">
@@ -354,6 +360,11 @@ interface InverterListResponse {
     inverter?: InverterConfig[];
 }
 
+interface EnergyHistoryFile {
+    path: string;
+    size: number;
+}
+
 function localDateInputValue(date = new Date()): string {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -395,6 +406,7 @@ export default defineComponent({
             dailyEnergyLoading: false,
             dailyEnergyLoadId: 0,
             status: {} as EnergyHistoryStatus,
+            selectedHistoryFile: null as EnergyHistoryFile | null,
             liveTotal: null as Total | null,
             inverters: [] as InverterConfig[],
             histories: [] as EnergyHistorySeries[],

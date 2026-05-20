@@ -777,6 +777,7 @@
         "UploadFailed": "Energy history file upload failed",
         "FilePath": "File",
         "FileSize": "Size",
+        "SelectedFile": "Selected file",
         "Download": "Download",
         "DownloadFailed": "Energy history file download failed",
         "NoFiles": "No history files",

@@ -776,6 +776,7 @@
         "UploadFailed": "Upload der Energy-History-Datei fehlgeschlagen",
         "FilePath": "Datei",
         "FileSize": "Groesse",
+        "SelectedFile": "Ausgewaehlte Datei",
         "Download": "Herunterladen",
         "DownloadFailed": "Download der Energy-History-Datei fehlgeschlagen",
         "NoFiles": "Keine History-Dateien",

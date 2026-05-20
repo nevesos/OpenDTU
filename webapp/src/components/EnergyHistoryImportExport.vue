@@ -55,7 +55,13 @@
                     </tr>
                 </thead>
                 <tbody>
-                    <tr v-for="file in files" :key="file.path">
+                    <tr
+                        v-for="file in files"
+                        :key="file.path"
+                        class="energy-history-file-row"
+                        :class="{ 'table-active': selectedFilePath === file.path }"
+                        @click="selectFile(file)"
+                    >
                         <td class="text-break">{{ file.path }}</td>
                         <td class="text-end text-nowrap">{{ formatBytes(file.size) }}</td>
                         <td class="text-end">
@@ -63,7 +69,7 @@
                                 type="button"
                                 class="btn btn-outline-primary btn-sm"
                                 :title="$t('energyhistory.Download')"
-                                @click="downloadFile(file)"
+                                @click.stop="downloadFile(file)"
                             >
                                 <BIconDownload />
                             </button>
@@ -112,12 +118,13 @@ export default defineComponent({
         BIconDownload,
         BIconUpload,
     },
-    emits: ['changed'],
+    emits: ['changed', 'selected'],
     data() {
         return {
             loading: false,
             uploading: false,
             files: [] as EnergyHistoryFile[],
+            selectedFilePath: '',
             uploadFile: null as File | null,
             uploadPath: '',
             alert: {
@@ -137,6 +144,10 @@ export default defineComponent({
                 .then((response) => handleResponse(response, this.$emitter, this.$router))
                 .then((data: EnergyHistoryFileListResponse) => {
                     this.files = (data.files || []).sort((a, b) => a.path.localeCompare(b.path));
+                    if (this.selectedFilePath && !this.files.some((file) => file.path === this.selectedFilePath)) {
+                        this.selectedFilePath = '';
+                        this.$emit('selected', null);
+                    }
                 })
                 .catch(() => {
                     this.files = [];
@@ -144,6 +155,10 @@ export default defineComponent({
                 .finally(() => {
                     this.loading = false;
                 });
+        },
+        selectFile(file: EnergyHistoryFile) {
+            this.selectedFilePath = file.path;
+            this.$emit('selected', file);
         },
         downloadFile(file: EnergyHistoryFile) {
             const params = new URLSearchParams();
@@ -234,3 +249,9 @@ export default defineComponent({
     },
 });
 </script>
+
+<style scoped>
+.energy-history-file-row {
+    cursor: pointer;
+}
+</style>
