@@ -766,14 +766,14 @@ EnergyHistoryClass EnergyHistory;
 EnergyHistoryClass::EnergyHistoryClass()
     : _loopTask(5 * 60 * TASK_SECOND, TASK_FOREVER, std::bind(&EnergyHistoryClass::loop, this))
     , _startupTask(TASK_IMMEDIATE, TASK_ONCE, std::bind(&EnergyHistoryClass::startupLoop, this))
+    , _recoveryTask(TASK_IMMEDIATE, TASK_ONCE, std::bind(&EnergyHistoryClass::recoveryLoop, this))
 {
 }
 
 void EnergyHistoryClass::init(Scheduler& scheduler)
 {
-    scheduler.addTask(_startupTask);
     scheduler.addTask(_loopTask);
-    _startupTask.enable();
+    scheduler.addTask(_recoveryTask);
     _loopTask.enable();
 }
 
@@ -828,7 +828,42 @@ void EnergyHistoryClass::startupLoop()
     }
 #endif
 
+    // Runtime startup recovery is intentionally not run from the scheduler.
+    // Full-file scans can block other scheduler-driven services on device.
+}
+
+bool EnergyHistoryClass::requestRecovery()
+{
+    if (_recoveryPending || _recoveryRunning) {
+        return false;
+    }
+
+    _recoveryPending = true;
+    _recoveryTask.enable();
+    _recoveryTask.restart();
+    return true;
+}
+
+void EnergyHistoryClass::getRecoveryStatus(RecoveryStatus& status)
+{
+    status.pending = _recoveryPending;
+    status.running = _recoveryRunning;
+    status.runCount = _recoveryRunCount;
+    status.lastStartedMillis = _recoveryLastStartedMillis;
+    status.lastFinishedMillis = _recoveryLastFinishedMillis;
+}
+
+void EnergyHistoryClass::recoveryLoop()
+{
+    _recoveryPending = false;
+    _recoveryRunning = true;
+    _recoveryRunCount++;
+    _recoveryLastStartedMillis = millis();
+
     recoverExistingEnergyFiles();
+
+    _recoveryLastFinishedMillis = millis();
+    _recoveryRunning = false;
 }
 
 bool EnergyHistoryClass::makeFileHeader(const FileType fileType, const TargetType targetType, const uint64_t serial, const uint16_t year, const uint8_t month, FileHeader& header)

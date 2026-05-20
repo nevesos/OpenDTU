@@ -10,5 +10,6 @@ public:
 
 private:
     void onStatus(AsyncWebServerRequest* request);
+    void onRecoveryPost(AsyncWebServerRequest* request);
     void onHistory(AsyncWebServerRequest* request);
 };

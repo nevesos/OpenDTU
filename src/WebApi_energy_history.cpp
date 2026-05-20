@@ -126,6 +126,15 @@ void writeScan(JsonObject root, const EnergyHistoryClass::ScanResult& scan)
     root["can_truncate_final_block"] = scan.canTruncateFinalBlock;
 }
 
+void writeRecoveryStatus(JsonObject root, const EnergyHistoryClass::RecoveryStatus& status)
+{
+    root["pending"] = status.pending;
+    root["running"] = status.running;
+    root["run_count"] = status.runCount;
+    root["last_started_ms"] = status.lastStartedMillis;
+    root["last_finished_ms"] = status.lastFinishedMillis;
+}
+
 void sendBadRequest(AsyncWebServerRequest* request, const char* message)
 {
     AsyncJsonResponse* response = new AsyncJsonResponse();
@@ -144,6 +153,7 @@ void WebApiEnergyHistoryClass::init(AsyncWebServer& server, Scheduler& scheduler
     using std::placeholders::_1;
 
     server.on("/api/energy/history/status", HTTP_GET, static_cast<ArRequestHandlerFunction>(std::bind(&WebApiEnergyHistoryClass::onStatus, this, _1)));
+    server.on("/api/energy/history/recovery", HTTP_POST, static_cast<ArRequestHandlerFunction>(std::bind(&WebApiEnergyHistoryClass::onRecoveryPost, this, _1)));
     server.on("/api/energy/history", HTTP_GET, static_cast<ArRequestHandlerFunction>(std::bind(&WebApiEnergyHistoryClass::onHistory, this, _1)));
 }
 
@@ -168,6 +178,33 @@ void WebApiEnergyHistoryClass::onStatus(AsyncWebServerRequest* request)
     root["bytes_scanned"] = status.bytesScanned;
     root["littlefs_total"] = status.littlefsTotalBytes;
     root["littlefs_used"] = status.littlefsUsedBytes;
+
+    EnergyHistoryClass::RecoveryStatus recoveryStatus;
+    EnergyHistory.getRecoveryStatus(recoveryStatus);
+    writeRecoveryStatus(root["recovery"].to<JsonObject>(), recoveryStatus);
+
+    WebApi.sendJsonResponse(request, response, __FUNCTION__, __LINE__);
+}
+
+void WebApiEnergyHistoryClass::onRecoveryPost(AsyncWebServerRequest* request)
+{
+    if (!WebApi.checkCredentials(request)) {
+        return;
+    }
+
+    const bool started = EnergyHistory.requestRecovery();
+
+    EnergyHistoryClass::RecoveryStatus status;
+    EnergyHistory.getRecoveryStatus(status);
+
+    AsyncJsonResponse* response = new AsyncJsonResponse();
+    auto& root = response->getRoot();
+    root["type"] = started ? "success" : "warning";
+    root["message"] = started ? "Energy history recovery scheduled" : "Energy history recovery is already pending or running";
+    writeRecoveryStatus(root["recovery"].to<JsonObject>(), status);
+    if (!started) {
+        response->setCode(409);
+    }
 
     WebApi.sendJsonResponse(request, response, __FUNCTION__, __LINE__);
 }

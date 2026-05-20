@@ -125,7 +125,17 @@ public:
         size_t littlefsUsedBytes = 0;
     };
 
+    struct RecoveryStatus {
+        bool pending = false;
+        bool running = false;
+        uint32_t runCount = 0;
+        uint32_t lastStartedMillis = 0;
+        uint32_t lastFinishedMillis = 0;
+    };
+
     bool getStatus(Status& status);
+    bool requestRecovery();
+    void getRecoveryStatus(RecoveryStatus& status);
     bool queryFiveMinuteDay(EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, uint8_t month, uint8_t day, EnergyHistoryFormat::FiveMinuteRecord* records, uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result);
     bool queryDay(EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, uint16_t fromDayOfYear, uint16_t toDayOfYear, EnergyHistoryFormat::DayRecord* records, uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result);
     bool queryMonth(EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, uint8_t fromMonth, uint8_t toMonth, EnergyHistoryFormat::MonthRecord* records, uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result);
@@ -155,6 +165,7 @@ private:
     };
 
     void startupLoop();
+    void recoveryLoop();
     void loop();
     bool makeFileHeader(EnergyHistoryFormat::FileType fileType, EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, uint8_t month, EnergyHistoryFormat::FileHeader& header);
     String makeFiveMinutePath(EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, uint8_t month);
@@ -190,6 +201,12 @@ private:
 
     Task _loopTask;
     Task _startupTask;
+    Task _recoveryTask;
+    bool _recoveryPending = false;
+    bool _recoveryRunning = false;
+    uint32_t _recoveryRunCount = 0;
+    uint32_t _recoveryLastStartedMillis = 0;
+    uint32_t _recoveryLastFinishedMillis = 0;
     bool _lastFiveMinuteSlotValid = false;
     uint16_t _lastFiveMinuteYear = 0;
     uint8_t _lastFiveMinuteMonth = 0;
