@@ -744,6 +744,27 @@ uint16_t firstDayOfYearForMonth(const uint16_t year, const uint8_t month)
     return dayOfYear(year, month, 1);
 }
 
+bool monthDayFromDayOfYear(const uint16_t year, const uint16_t dayOfYearValue, uint8_t& month, uint8_t& day)
+{
+    if (dayOfYearValue < 1 || dayOfYearValue > (isLeapYear(year) ? 366 : 365)) {
+        return false;
+    }
+
+    uint16_t remaining = dayOfYearValue;
+    for (uint8_t m = 1; m <= 12; m++) {
+        const uint8_t monthDays = daysInMonth(year, m);
+        if (remaining <= monthDays) {
+            month = m;
+            day = static_cast<uint8_t>(remaining);
+            return true;
+        }
+
+        remaining -= monthDays;
+    }
+
+    return false;
+}
+
 uint16_t saturateUint16(const uint32_t value)
 {
     return value > UINT16_MAX ? UINT16_MAX : static_cast<uint16_t>(value);
@@ -1745,13 +1766,18 @@ bool EnergyHistoryClass::queryDay(const TargetType targetType, const uint64_t se
     }
 
     uint16_t allRecordCount = 0;
-    if (!readDayFile(path.c_str(), header, allRecords.get(), 366, allRecordCount, result)) {
+    if (!readDayFile(path.c_str(), header, allRecords.get(), 366, allRecordCount, result)
+            && LittleFS.exists(path)) {
         return false;
     }
 
-    for (uint16_t i = 0; i < allRecordCount; i++) {
-        if (allRecords[i].dayOfYear < fromDayOfYear || allRecords[i].dayOfYear > toDayOfYear) {
-            continue;
+    for (uint16_t dayOfYearValue = fromDayOfYear; dayOfYearValue <= toDayOfYear; dayOfYearValue++) {
+        const DayRecord* existingRecord = nullptr;
+        for (uint16_t i = 0; i < allRecordCount; i++) {
+            if (allRecords[i].dayOfYear == dayOfYearValue) {
+                existingRecord = &allRecords[i];
+                break;
+            }
         }
 
         if (recordCount >= recordCapacity) {
@@ -1759,8 +1785,20 @@ bool EnergyHistoryClass::queryDay(const TargetType targetType, const uint64_t se
             continue;
         }
 
-        records[recordCount] = allRecords[i];
-        recordCount++;
+        if (existingRecord != nullptr) {
+            records[recordCount] = *existingRecord;
+            recordCount++;
+            continue;
+        }
+
+        uint8_t month = 0;
+        uint8_t day = 0;
+        DayRecord derivedRecord;
+        if (monthDayFromDayOfYear(year, dayOfYearValue, month, day)
+                && buildDayRecordFromFiveMinute(targetType, serial, year, month, day, derivedRecord)) {
+            records[recordCount] = derivedRecord;
+            recordCount++;
+        }
     }
 
     return true;
