@@ -4,6 +4,7 @@
 #include <Arduino.h>
 #include <TaskSchedulerDeclarations.h>
 #include <cstdint>
+#include <functional>
 
 namespace EnergyHistoryFormat {
 
@@ -133,9 +134,16 @@ public:
         uint32_t lastFinishedMillis = 0;
     };
 
+    struct FileInfo {
+        String path;
+        size_t size = 0;
+    };
+
     bool getStatus(Status& status);
     bool requestRecovery();
     void getRecoveryStatus(RecoveryStatus& status);
+    bool isManagedFilePath(const String& path, String& normalizedPath);
+    bool listFiles(const std::function<void(const FileInfo&)>& visitor);
     bool queryFiveMinuteDay(EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, uint8_t month, uint8_t day, EnergyHistoryFormat::FiveMinuteRecord* records, uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result);
     bool queryDay(EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, uint16_t fromDayOfYear, uint16_t toDayOfYear, EnergyHistoryFormat::DayRecord* records, uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result);
     bool queryMonth(EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, uint8_t fromMonth, uint8_t toMonth, EnergyHistoryFormat::MonthRecord* records, uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result);
@@ -185,6 +193,7 @@ private:
     bool truncateFile(const char* path, size_t size);
     void recoverExistingEnergyFiles();
     void recoverEnergyDirectory(const char* directoryPath);
+    bool listFilesInDirectory(const char* directoryPath, const std::function<void(const FileInfo&)>& visitor);
     bool scanFile(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, ScanResult& result);
     bool scanFiveMinuteFile(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, ScanResult& result);
     template <typename Record>

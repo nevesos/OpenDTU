@@ -150,6 +150,8 @@
             </div>
         </div>
 
+        <EnergyHistoryImportExport @changed="reloadAfterFileChange" />
+
         <CardElement :text="$t('energyhistory.Results')" textVariant="text-bg-primary" add-space table>
             <!-- Metadata Info -->
             <div class="row g-2 mb-3 px-3" v-if="activeHistory.metadata">
@@ -255,6 +257,7 @@
 <script lang="ts">
 import BasePage from '@/components/BasePage.vue';
 import CardElement from '@/components/CardElement.vue';
+import EnergyHistoryImportExport from '@/components/EnergyHistoryImportExport.vue';
 import InverterTotalInfo from '@/components/InverterTotalInfo.vue';
 import type { Total } from '@/types/LiveDataStatus';
 import { authHeader, handleResponse } from '@/utils/authentication';
@@ -377,6 +380,7 @@ export default defineComponent({
     components: {
         BasePage,
         CardElement,
+        EnergyHistoryImportExport,
         InverterTotalInfo,
         BIconChevronLeft,
         BIconChevronRight,
@@ -703,6 +707,10 @@ export default defineComponent({
                 .then((data) => {
                     this.status = data;
                 });
+        },
+        reloadAfterFileChange() {
+            this.loadStatus();
+            this.loadHistory();
         },
         loadLiveTotal() {
             return fetch('/api/livedata/status', { headers: authHeader() })

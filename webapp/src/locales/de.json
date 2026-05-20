@@ -767,6 +767,18 @@
         "SampleCount": "Samples",
         "DayCount": "Tage",
         "NoData": "Keine Historiedaten",
+        "DataManagement": "Datenverwaltung",
+        "ImportFile": "Importdatei",
+        "ImportTargetPath": "Zielpfad",
+        "Uploading": "Lade hoch...",
+        "UploadOverwrite": "Hochladen und ueberschreiben",
+        "UploadSuccess": "Energy-History-Datei hochgeladen",
+        "UploadFailed": "Upload der Energy-History-Datei fehlgeschlagen",
+        "FilePath": "Datei",
+        "FileSize": "Groesse",
+        "Download": "Herunterladen",
+        "DownloadFailed": "Download der Energy-History-Datei fehlgeschlagen",
+        "NoFiles": "Keine History-Dateien",
         "ScanSummary": "Scan: {blocks} gültige Blöcke, {skipped} übersprungene Blöcke, {records} gültige Datensätze"
     },
     "loggingadmin": {

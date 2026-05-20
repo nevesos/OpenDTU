@@ -768,6 +768,18 @@
         "SampleCount": "Samples",
         "DayCount": "Days",
         "NoData": "No history data",
+        "DataManagement": "Data management",
+        "ImportFile": "Import file",
+        "ImportTargetPath": "Target path",
+        "Uploading": "Uploading...",
+        "UploadOverwrite": "Upload and overwrite",
+        "UploadSuccess": "Energy history file uploaded",
+        "UploadFailed": "Energy history file upload failed",
+        "FilePath": "File",
+        "FileSize": "Size",
+        "Download": "Download",
+        "DownloadFailed": "Energy history file download failed",
+        "NoFiles": "No history files",
         "ScanSummary": "Scan: {blocks} valid blocks, {skipped} skipped blocks, {records} valid records"
     },
     "loggingadmin": {

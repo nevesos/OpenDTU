@@ -866,6 +866,43 @@ void EnergyHistoryClass::recoveryLoop()
     _recoveryRunning = false;
 }
 
+bool EnergyHistoryClass::isManagedFilePath(const String& path, String& normalizedPath)
+{
+    normalizedPath = path;
+    normalizedPath.trim();
+
+    if (normalizedPath.isEmpty()) {
+        return false;
+    }
+
+    if (!normalizedPath.startsWith("/")) {
+        normalizedPath = "/" + normalizedPath;
+    }
+
+    if (normalizedPath.indexOf("..") >= 0 || normalizedPath.indexOf("//") >= 0) {
+        return false;
+    }
+
+    if (!normalizedPath.startsWith(String(EnergyDirectory) + "/")) {
+        return false;
+    }
+
+    if (normalizedPath.endsWith("/")) {
+        return false;
+    }
+
+    return true;
+}
+
+bool EnergyHistoryClass::listFiles(const std::function<void(const FileInfo&)>& visitor)
+{
+    if (!visitor) {
+        return false;
+    }
+
+    return listFilesInDirectory(EnergyDirectory, visitor);
+}
+
 bool EnergyHistoryClass::makeFileHeader(const FileType fileType, const TargetType targetType, const uint64_t serial, const uint16_t year, const uint8_t month, FileHeader& header)
 {
     std::memset(&header, 0, sizeof(header));
@@ -1243,6 +1280,41 @@ void EnergyHistoryClass::recoverEnergyDirectory(const char* directoryPath)
 
         file = directory.openNextFile();
     }
+
+    file.close();
+    directory.close();
+}
+
+bool EnergyHistoryClass::listFilesInDirectory(const char* directoryPath, const std::function<void(const FileInfo&)>& visitor)
+{
+    File directory = LittleFS.open(directoryPath, "r", false);
+    if (!directory || !directory.isDirectory()) {
+        return false;
+    }
+
+    File file = directory.openNextFile();
+    while (file) {
+        String path = file.path();
+        if (path.isEmpty()) {
+            const String fileName = file.name();
+            path = fileName.startsWith("/") ? fileName : String(directoryPath) + "/" + fileName;
+        }
+
+        if (file.isDirectory()) {
+            listFilesInDirectory(path.c_str(), visitor);
+        } else {
+            FileInfo info;
+            info.path = path;
+            info.size = file.size();
+            visitor(info);
+        }
+
+        file = directory.openNextFile();
+    }
+
+    file.close();
+    directory.close();
+    return true;
 }
 
 bool EnergyHistoryClass::scanFile(const char* path, const FileHeader& expectedHeader, ScanResult& result)

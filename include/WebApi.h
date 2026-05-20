@@ -5,6 +5,7 @@
 #include "WebApi_devinfo.h"
 #include "WebApi_dtu.h"
 #include "WebApi_energy_history.h"
+#include "WebApi_energy_history_file.h"
 #include "WebApi_errors.h"
 #include "WebApi_eventlog.h"
 #include "WebApi_file.h"
@@ -53,6 +54,7 @@ private:
     WebApiDevInfoClass _webApiDevInfo;
     WebApiDtuClass _webApiDtu;
     WebApiEnergyHistoryClass _webApiEnergyHistory;
+    WebApiEnergyHistoryFileClass _webApiEnergyHistoryFile;
     WebApiEventlogClass _webApiEventlog;
     WebApiFileClass _webApiFile;
     WebApiFirmwareClass _webApiFirmware;

@@ -754,6 +754,18 @@
         "SampleCount": "Echantillons",
         "DayCount": "Jours",
         "NoData": "Aucune donnee historique",
+        "DataManagement": "Gestion des donnees",
+        "ImportFile": "Fichier d'import",
+        "ImportTargetPath": "Chemin cible",
+        "Uploading": "Televersement...",
+        "UploadOverwrite": "Televerser et remplacer",
+        "UploadSuccess": "Fichier d'historique televerse",
+        "UploadFailed": "Echec du televersement du fichier d'historique",
+        "FilePath": "Fichier",
+        "FileSize": "Taille",
+        "Download": "Telecharger",
+        "DownloadFailed": "Echec du telechargement du fichier d'historique",
+        "NoFiles": "Aucun fichier d'historique",
         "ScanSummary": "Scan: {blocks} blocs valides, {skipped} blocs ignores, {records} enregistrements valides"
     },
     "loggingadmin": {
