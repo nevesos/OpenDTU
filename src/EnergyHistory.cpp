@@ -1103,11 +1103,6 @@ bool EnergyHistoryClass::appendBlock(const char* path, const FileHeader& expecte
         return false;
     }
 
-    ScanResult recoveryScan;
-    if (!recoverFinalBlock(path, expectedHeader, recoveryScan)) {
-        return false;
-    }
-
     BlockHeader blockHeader;
     std::memcpy(blockHeader.magic, BlockMagic, sizeof(blockHeader.magic));
     blockHeader.blockIndex = blockIndex;
@@ -1121,18 +1116,31 @@ bool EnergyHistoryClass::appendBlock(const char* path, const FileHeader& expecte
         return false;
     }
 
-    File file = LittleFS.open(path, "a");
-    if (!file) {
+    auto appendEncodedBlock = [&]() -> bool {
+        File file = LittleFS.open(path, "a");
+        if (!file) {
+            return false;
+        }
+
+        if (!writeFull(file, encodedBlockHeader, sizeof(encodedBlockHeader))
+                || !writeFull(file, payload, payloadSize)) {
+            return false;
+        }
+
+        file.flush();
+        return true;
+    };
+
+    if (appendEncodedBlock()) {
+        return true;
+    }
+
+    ScanResult recoveryScan;
+    if (!recoverFinalBlock(path, expectedHeader, recoveryScan)) {
         return false;
     }
 
-    if (!writeFull(file, encodedBlockHeader, sizeof(encodedBlockHeader))
-            || !writeFull(file, payload, payloadSize)) {
-        return false;
-    }
-
-    file.flush();
-    return true;
+    return appendEncodedBlock();
 }
 
 bool EnergyHistoryClass::appendFiveMinuteBlock(const char* path, const FileHeader& expectedHeader, const FiveMinuteRecord* records, const uint16_t recordCount, const uint16_t blockIndex)
@@ -1583,32 +1591,8 @@ bool EnergyHistoryClass::getStatus(Status& status)
         File file = directory.openNextFile();
         while (file) {
             if (!file.isDirectory() && file.size() >= FileHeaderSize) {
-                const String fileName = file.name();
-                String path = fileName;
-                if (!fileName.startsWith("/")) {
-                    path = String(directoryPath) + "/" + fileName;
-                }
-
-                uint8_t encodedHeader[FileHeaderSize];
-                if (file.read(encodedHeader, sizeof(encodedHeader)) == FileHeaderSize) {
-                    FileHeader header;
-                    ScanResult scan;
-                    if (decodeFileHeader(encodedHeader, sizeof(encodedHeader), header)
-                            && scanFile(path.c_str(), header, scan)) {
-                        status.filesScanned += scan.filesScanned;
-                        status.validBlocks += scan.validBlocks;
-                        status.skippedBlocks += scan.skippedBlocks;
-                        status.validRecords += scan.validRecords;
-                        status.skippedRecords += scan.skippedRecords;
-                        status.bytesScanned += scan.fileSize;
-                        if (scan.invalidFinalBlock) {
-                            status.invalidFinalBlockFiles++;
-                        }
-                        if (scan.canTruncateFinalBlock) {
-                            status.truncatableFinalBlockFiles++;
-                        }
-                    }
-                }
+                status.filesScanned++;
+                status.bytesScanned += file.size();
             }
 
             file = directory.openNextFile();

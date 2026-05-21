@@ -634,9 +634,6 @@ export default defineComponent({
         historyStatusSignature(status: EnergyHistoryStatus): string {
             return [
                 status.files_scanned || 0,
-                status.valid_blocks || 0,
-                status.skipped_blocks || 0,
-                status.valid_records || 0,
                 status.bytes_scanned || 0,
                 status.littlefs_used || 0,
             ].join(':');
