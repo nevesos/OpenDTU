@@ -9,16 +9,11 @@
                 :aria-selected="isSelected(inverter.serial)"
                 @click="selectInverter(inverter.serial)"
             >
-                <span class="inverter-update-status" :title="formatDataAgeTitle(inverter)">
-                    <span
-                        :key="`${inverter.serial}:${updateIndicators[inverter.serial]}`"
-                        class="inverter-update-marker"
-                        :class="{ 'inverter-update-marker-ping': updateIndicators[inverter.serial] !== undefined }"
-                    ></span>
-                    <span v-if="inverter.poll_enabled" class="inverter-update-age" :class="dataAgeClass(inverter)">
-                        {{ formatDataAgeSeconds(inverter) }}
-                    </span>
-                </span>
+                <span
+                    :key="`${inverter.serial}:${updateIndicators[inverter.serial]}`"
+                    class="inverter-update-marker"
+                    :class="{ 'inverter-update-marker-ping': updateIndicators[inverter.serial] !== undefined }"
+                ></span>
                 <div class="d-flex align-items-center inverter-side-nav-content">
                     <div class="me-2 flex-shrink-0">
                         <span
@@ -76,10 +71,6 @@ export default defineComponent({
             type: Object as PropType<Record<string, number>>,
             default: () => ({}),
         },
-        dataAgeThresholdMs: {
-            type: Number,
-            default: 300000,
-        },
     },
     emits: ['update:modelValue', 'select'],
     methods: {
@@ -105,28 +96,6 @@ export default defineComponent({
 
             return `${this.$n(value.v, value.d === 0 ? 'decimalNoDigits' : 'decimal')} ${value.u}`;
         },
-        formatDataAgeSeconds(inverter: Inverter): string {
-            if (!Number.isFinite(inverter.data_age_ms)) {
-                return '-';
-            }
-
-            return `${Math.floor(inverter.data_age_ms / 1000)}s`;
-        },
-        formatDataAgeTitle(inverter: Inverter): string {
-            if (!Number.isFinite(inverter.data_age_ms)) {
-                return this.$t('dataagedisplay.DataAge');
-            }
-
-            return `${this.$t('dataagedisplay.DataAge')}: ${this.$t('dataagedisplay.SecondsSince', {
-                n: Math.floor(inverter.data_age_ms / 1000),
-            })}`;
-        },
-        dataAgeClass(inverter: Inverter) {
-            return {
-                'inverter-update-age-fresh': Number.isFinite(inverter.data_age_ms) && inverter.data_age_ms <= this.dataAgeThresholdMs,
-                'inverter-update-age-stale': !Number.isFinite(inverter.data_age_ms) || inverter.data_age_ms > this.dataAgeThresholdMs,
-            };
-        },
     },
 });
 </script>
@@ -144,7 +113,6 @@ export default defineComponent({
 .inverter-side-nav-select {
     flex: 1 1 0;
     min-width: 0;
-    padding-right: 2.1rem;
     text-align: left;
 }
 
@@ -217,23 +185,14 @@ export default defineComponent({
     }
 }
 
-.inverter-update-status {
+.inverter-update-marker {
     position: absolute;
     top: 50%;
     right: 0.3rem;
-    display: flex;
-    min-width: 1.55rem;
-    transform: translateY(-50%);
-    align-items: center;
-    flex-direction: column;
-    pointer-events: none;
-}
-
-.inverter-update-marker {
-    position: relative;
     display: block;
     width: 8px;
     height: 8px;
+    transform: translateY(-50%);
 }
 
 .inverter-update-marker:before {
@@ -259,22 +218,6 @@ export default defineComponent({
         inset 0 0 4px rgb(56, 111, 169);
     transform: scale(0);
     animation: online 2.5s ease-in-out;
-}
-
-.inverter-update-age {
-    margin-top: 0.22rem;
-    font-size: 0.58rem;
-    font-weight: 700;
-    line-height: 1;
-    white-space: nowrap;
-}
-
-.inverter-update-age-fresh {
-    color: var(--bs-success);
-}
-
-.inverter-update-age-stale {
-    color: var(--bs-danger);
 }
 
 @keyframes online {

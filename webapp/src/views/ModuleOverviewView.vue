@@ -297,7 +297,6 @@ export default defineComponent({
             selectedInverterSerials: [] as string[],
             inverterUpdateIndicators: {} as Record<string, number>,
             inverterUpdateTimeouts: {} as Record<string, number>,
-            dataAgeTimers: {} as Record<string, number>,
             showDisabledModules: false,
             heatmapMode: 'none' as HeatmapMode,
             zoomFactor: 1,
@@ -347,7 +346,6 @@ export default defineComponent({
         this.clearDragListeners();
         this.clearBackgroundPointDragListeners();
         Object.values(this.inverterUpdateTimeouts).forEach((timeout) => window.clearTimeout(timeout));
-        Object.values(this.dataAgeTimers).forEach((timeout) => window.clearTimeout(timeout));
         window.removeEventListener('resize', this.updateCanvasAvailableHeight);
         window.removeEventListener('keydown', this.onBackgroundKeyDown);
         this.$emitter.off('logged-in', this.updateLoginState);
@@ -703,7 +701,6 @@ export default defineComponent({
                 .then((response) => handleResponse(response, this.$emitter, this.$router))
                 .then((data) => {
                     this.liveData = data;
-                    this.liveData.inverters?.forEach((inverter) => this.resetDataAging(inverter));
                     this.ensureModulePositions();
                     if (triggerLoading) {
                         this.dataLoading = false;
@@ -761,31 +758,9 @@ export default defineComponent({
             } else if (this.liveData.inverters[idx] !== undefined) {
                 Object.assign(this.liveData.inverters[idx], updatedInverter);
             }
-            this.resetDataAging(updatedInverter);
 
             this.ensureModulePositions();
             this.updateCanvasAvailableHeightAfterRender();
-        },
-        resetDataAging(inverter: Inverter) {
-            if (this.dataAgeTimers[inverter.serial] !== undefined) {
-                window.clearTimeout(this.dataAgeTimers[inverter.serial]);
-            }
-
-            const nextMs = 1000 - (inverter.data_age_ms % 1000);
-            this.dataAgeTimers[inverter.serial] = window.setTimeout(() => {
-                this.doDataAging(inverter.serial);
-            }, nextMs);
-        },
-        doDataAging(serial: string) {
-            const inverter = this.liveData?.inverters?.find((existingInverter) => existingInverter.serial === serial);
-            if (inverter === undefined) {
-                return;
-            }
-
-            inverter.data_age_ms += 1000;
-            this.dataAgeTimers[serial] = window.setTimeout(() => {
-                this.doDataAging(serial);
-            }, 1000);
         },
         loadLayout() {
             fetch(`/api/file/get?file=${MODULE_OVERVIEW_LAYOUT_FILE}`, { headers: authHeader() })
