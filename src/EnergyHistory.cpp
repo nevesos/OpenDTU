@@ -1630,6 +1630,34 @@ bool EnergyHistoryClass::scanManagedFile(const String& path, ScanResult& result)
     return scanFile(normalizedPath.c_str(), header, result);
 }
 
+bool EnergyHistoryClass::recoverManagedFile(const String& path, ScanResult& result)
+{
+    result = ScanResult();
+
+    String normalizedPath;
+    if (!isManagedFilePath(path, normalizedPath)) {
+        return false;
+    }
+
+    File file = LittleFS.open(normalizedPath.c_str(), "r", false);
+    if (!file || file.isDirectory() || file.size() < FileHeaderSize) {
+        return false;
+    }
+
+    uint8_t encodedHeader[FileHeaderSize];
+    if (file.read(encodedHeader, sizeof(encodedHeader)) != FileHeaderSize) {
+        return false;
+    }
+
+    FileHeader header;
+    if (!decodeFileHeader(encodedHeader, sizeof(encodedHeader), header)) {
+        return false;
+    }
+
+    file.close();
+    return recoverFinalBlock(normalizedPath.c_str(), header, result);
+}
+
 bool EnergyHistoryClass::queryFiveMinuteDay(const TargetType targetType, const uint64_t serial, const uint16_t year, const uint8_t month, const uint8_t day, FiveMinuteRecord* records, const uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result)
 {
     result = ScanResult();

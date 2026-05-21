@@ -145,6 +145,7 @@ public:
     bool isManagedFilePath(const String& path, String& normalizedPath);
     bool listFiles(const std::function<void(const FileInfo&)>& visitor);
     bool scanManagedFile(const String& path, ScanResult& result);
+    bool recoverManagedFile(const String& path, ScanResult& result);
     bool queryFiveMinuteDay(EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, uint8_t month, uint8_t day, EnergyHistoryFormat::FiveMinuteRecord* records, uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result);
     bool queryDay(EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, uint16_t fromDayOfYear, uint16_t toDayOfYear, EnergyHistoryFormat::DayRecord* records, uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result);
     bool queryMonth(EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, uint8_t fromMonth, uint8_t toMonth, EnergyHistoryFormat::MonthRecord* records, uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result);

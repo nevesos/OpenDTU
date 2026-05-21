@@ -130,7 +130,18 @@
                 </div>
 
                 <div class="energy-history-file-scan mt-3" v-if="selectedFileDeepScan && selectedFileDeepScanPath === selectedFile.path">
-                    <div class="fw-semibold mb-2">{{ $t('energyhistory.DeepScanResult') }}</div>
+                    <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+                        <div class="fw-semibold">{{ $t('energyhistory.DeepScanResult') }}</div>
+                        <button
+                            v-if="selectedFileDeepScan.scan.can_truncate_final_block"
+                            type="button"
+                            class="btn btn-warning btn-sm"
+                            :disabled="recoveringFilePath === selectedFile.path"
+                            @click="recoverFile(selectedFile)"
+                        >
+                            {{ recoveringFilePath === selectedFile.path ? $t('energyhistory.Recovering') : $t('energyhistory.RecoverFile') }}
+                        </button>
+                    </div>
                     <div class="row g-2 small">
                         <div class="col-auto">
                             <strong>{{ $t('energyhistory.ValidBlocks') }}:</strong>
@@ -338,6 +349,7 @@ export default defineComponent({
             selectedFileDeepScan: null as EnergyHistoryFileScanResponse | null,
             selectedFileDeepScanPath: '',
             deepScanLoadingPath: '',
+            recoveringFilePath: '',
             selectedFileQuery: null as EnergyHistoryFileQuery | null,
             selectedFilePreviewDate: '',
             selectedFilePreviewLoading: false,
@@ -696,6 +708,43 @@ export default defineComponent({
                 })
                 .finally(() => {
                     this.deepScanLoadingPath = '';
+                });
+        },
+        recoverFile(file: EnergyHistoryFile) {
+            if (!window.confirm(String(this.$t('energyhistory.RecoverFileConfirm', { file: file.path })))) {
+                return;
+            }
+
+            this.recoveringFilePath = file.path;
+            const params = new URLSearchParams();
+            params.set('file', file.path);
+
+            fetch('/api/energy/history/file/recover?' + params.toString(), {
+                method: 'POST',
+                headers: authHeader(),
+            })
+                .then((response) => handleResponse(response, this.$emitter, this.$router))
+                .then((data: EnergyHistoryFileScanResponse & { type?: string; message?: string }) => {
+                    this.alert = {
+                        show: true,
+                        type: data.type || 'success',
+                        message: data.message || String(this.$t('energyhistory.RecoverSuccess')),
+                    };
+                    this.selectedFileDeepScan = data;
+                    this.selectedFileDeepScanPath = file.path;
+                    this.$emit('changed');
+                    return this.loadFiles()
+                        .then(() => this.loadSelectedFilePreview());
+                })
+                .catch(() => {
+                    this.alert = {
+                        show: true,
+                        type: 'danger',
+                        message: String(this.$t('energyhistory.RecoverFailed')),
+                    };
+                })
+                .finally(() => {
+                    this.recoveringFilePath = '';
                 });
         },
         onUploadFileSelected(event: Event) {

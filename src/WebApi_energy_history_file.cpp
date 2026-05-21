@@ -62,6 +62,7 @@ void WebApiEnergyHistoryFileClass::init(AsyncWebServer& server, Scheduler& sched
 
     server.on("/api/energy/history/file/list", HTTP_GET, static_cast<ArRequestHandlerFunction>(std::bind(&WebApiEnergyHistoryFileClass::onFileList, this, _1)));
     server.on("/api/energy/history/file/scan", HTTP_GET, static_cast<ArRequestHandlerFunction>(std::bind(&WebApiEnergyHistoryFileClass::onFileScan, this, _1)));
+    server.on("/api/energy/history/file/recover", HTTP_POST, static_cast<ArRequestHandlerFunction>(std::bind(&WebApiEnergyHistoryFileClass::onFileRecover, this, _1)));
     server.on("/api/energy/history/file/download", HTTP_GET, static_cast<ArRequestHandlerFunction>(std::bind(&WebApiEnergyHistoryFileClass::onFileDownload, this, _1)));
     server.on("/api/energy/history/file/delete", HTTP_POST, static_cast<ArRequestHandlerFunction>(std::bind(&WebApiEnergyHistoryFileClass::onFileDelete, this, _1)));
     server.on("/api/energy/history/file/upload", HTTP_POST,
@@ -112,6 +113,34 @@ void WebApiEnergyHistoryFileClass::onFileScan(AsyncWebServerRequest* request)
 
     AsyncJsonResponse* response = new AsyncJsonResponse();
     auto& root = response->getRoot();
+    root["file"] = path;
+    writeScan(root["scan"].to<JsonObject>(), scan);
+    WebApi.sendJsonResponse(request, response, __FUNCTION__, __LINE__);
+}
+
+void WebApiEnergyHistoryFileClass::onFileRecover(AsyncWebServerRequest* request)
+{
+    if (!WebApi.checkCredentials(request)) {
+        return;
+    }
+
+    String path;
+    if (!getManagedPath(request, path)) {
+        sendJsonMessage(request, 400, "warning", "Invalid energy history file path", WebApiError::GenericValueMissing);
+        return;
+    }
+
+    EnergyHistoryClass::ScanResult scan;
+    if (!EnergyHistory.recoverManagedFile(path, scan)) {
+        sendJsonMessage(request, 500, "danger", "Energy history file recovery failed", WebApiError::GenericWriteFailed);
+        return;
+    }
+
+    AsyncJsonResponse* response = new AsyncJsonResponse();
+    auto& root = response->getRoot();
+    root["type"] = "success";
+    root["message"] = "Energy history file recovered";
+    root["code"] = WebApiError::GenericSuccess;
     root["file"] = path;
     writeScan(root["scan"].to<JsonObject>(), scan);
     WebApi.sendJsonResponse(request, response, __FUNCTION__, __LINE__);
