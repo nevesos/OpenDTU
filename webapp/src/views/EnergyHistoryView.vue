@@ -190,6 +190,7 @@ interface EnergyHistoryStatus {
     valid_blocks?: number;
     skipped_blocks?: number;
     valid_records?: number;
+    bytes_scanned?: number;
     littlefs_total?: number;
     littlefs_used?: number;
 }
@@ -276,6 +277,8 @@ const DemoHistoryTargets = [
     { id: 'inv_999999990102', label: 'Demo WR 2' },
 ];
 
+const HistoryAutoRefreshIntervalMs = 10000;
+
 export default defineComponent({
     components: {
         BasePage,
@@ -295,6 +298,8 @@ export default defineComponent({
             dailyEnergyLoading: false,
             dailyEnergyLoadId: 0,
             status: {} as EnergyHistoryStatus,
+            lastHistoryStatusSignature: '',
+            historyAutoRefreshTimer: undefined as number | undefined,
             liveTotal: null as Total | null,
             inverters: [] as InverterConfig[],
             histories: [] as EnergyHistorySeries[],
@@ -570,6 +575,10 @@ export default defineComponent({
     },
     created() {
         this.reloadAll();
+        this.startHistoryAutoRefresh();
+    },
+    beforeUnmount() {
+        this.stopHistoryAutoRefresh();
     },
     methods: {
         reloadAll() {
@@ -589,7 +598,48 @@ export default defineComponent({
                 .then((response) => handleResponse(response, this.$emitter, this.$router))
                 .then((data) => {
                     this.status = data;
+                    this.lastHistoryStatusSignature = this.historyStatusSignature(data);
                 });
+        },
+        startHistoryAutoRefresh() {
+            this.stopHistoryAutoRefresh();
+            this.historyAutoRefreshTimer = window.setInterval(() => {
+                this.refreshHistoryIfChanged();
+            }, HistoryAutoRefreshIntervalMs);
+        },
+        stopHistoryAutoRefresh() {
+            if (this.historyAutoRefreshTimer !== undefined) {
+                window.clearInterval(this.historyAutoRefreshTimer);
+                this.historyAutoRefreshTimer = undefined;
+            }
+        },
+        refreshHistoryIfChanged() {
+            if (this.historyLoading || this.dailyEnergyLoading) {
+                return;
+            }
+
+            return fetch('/api/energy/history/status', { headers: authHeader() })
+                .then((response) => handleResponse(response, this.$emitter, this.$router, true))
+                .then((data: EnergyHistoryStatus) => {
+                    const signature = this.historyStatusSignature(data);
+                    const changed = this.lastHistoryStatusSignature !== '' && signature !== this.lastHistoryStatusSignature;
+                    this.status = data;
+                    this.lastHistoryStatusSignature = signature;
+                    if (changed) {
+                        this.loadHistory();
+                    }
+                })
+                .catch(() => undefined);
+        },
+        historyStatusSignature(status: EnergyHistoryStatus): string {
+            return [
+                status.files_scanned || 0,
+                status.valid_blocks || 0,
+                status.skipped_blocks || 0,
+                status.valid_records || 0,
+                status.bytes_scanned || 0,
+                status.littlefs_used || 0,
+            ].join(':');
         },
         reloadAfterFileChange() {
             this.loadStatus();

@@ -73,6 +73,14 @@
                             >
                                 <BIconDownload />
                             </button>
+                            <button
+                                type="button"
+                                class="btn btn-outline-danger btn-sm ms-1"
+                                :title="$t('energyhistory.Delete')"
+                                @click.stop="deleteFile(file)"
+                            >
+                                <BIconTrash />
+                            </button>
                         </td>
                     </tr>
                     <tr v-if="!loading && files.length === 0">
@@ -180,7 +188,7 @@
 import BootstrapAlert from '@/components/BootstrapAlert.vue';
 import CardElement from '@/components/CardElement.vue';
 import { authHeader, handleResponse } from '@/utils/authentication';
-import { BIconArrowClockwise, BIconDownload, BIconUpload } from 'bootstrap-icons-vue';
+import { BIconArrowClockwise, BIconDownload, BIconTrash, BIconUpload } from 'bootstrap-icons-vue';
 import { defineComponent } from 'vue';
 
 interface EnergyHistoryFile {
@@ -253,6 +261,7 @@ export default defineComponent({
         CardElement,
         BIconArrowClockwise,
         BIconDownload,
+        BIconTrash,
         BIconUpload,
     },
     emits: ['changed'],
@@ -546,6 +555,44 @@ export default defineComponent({
                         show: true,
                         type: 'danger',
                         message: String(this.$t('energyhistory.DownloadFailed')),
+                    };
+                });
+        },
+        deleteFile(file: EnergyHistoryFile) {
+            if (!window.confirm(String(this.$t('energyhistory.DeleteFileConfirm', { file: file.path })))) {
+                return;
+            }
+
+            const params = new URLSearchParams();
+            params.set('file', file.path);
+
+            fetch('/api/energy/history/file/delete?' + params.toString(), {
+                method: 'POST',
+                headers: authHeader(),
+            })
+                .then((response) => handleResponse(response, this.$emitter, this.$router))
+                .then((data) => {
+                    this.alert = {
+                        show: true,
+                        type: data.type || 'success',
+                        message: data.message || String(this.$t('energyhistory.DeleteSuccess')),
+                    };
+                    if (this.selectedFilePath === file.path) {
+                        this.selectedFilePath = '';
+                        this.selectedFile = null;
+                        this.selectedFileRows = [];
+                        this.selectedFileRawData = null;
+                        this.selectedFileQuery = null;
+                        this.selectedFilePreviewDate = '';
+                    }
+                    this.$emit('changed');
+                    return this.loadFiles();
+                })
+                .catch(() => {
+                    this.alert = {
+                        show: true,
+                        type: 'danger',
+                        message: String(this.$t('energyhistory.DeleteFailed')),
                     };
                 });
         },

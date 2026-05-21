@@ -11,6 +11,7 @@ public:
 private:
     void onFileList(AsyncWebServerRequest* request);
     void onFileDownload(AsyncWebServerRequest* request);
+    void onFileDelete(AsyncWebServerRequest* request);
     void onFileUploadFinish(AsyncWebServerRequest* request);
     void onFileUpload(AsyncWebServerRequest* request, String filename, size_t index, uint8_t* data, size_t len, bool final);
 };

@@ -49,6 +49,7 @@ void WebApiEnergyHistoryFileClass::init(AsyncWebServer& server, Scheduler& sched
 
     server.on("/api/energy/history/file/list", HTTP_GET, static_cast<ArRequestHandlerFunction>(std::bind(&WebApiEnergyHistoryFileClass::onFileList, this, _1)));
     server.on("/api/energy/history/file/download", HTTP_GET, static_cast<ArRequestHandlerFunction>(std::bind(&WebApiEnergyHistoryFileClass::onFileDownload, this, _1)));
+    server.on("/api/energy/history/file/delete", HTTP_POST, static_cast<ArRequestHandlerFunction>(std::bind(&WebApiEnergyHistoryFileClass::onFileDelete, this, _1)));
     server.on("/api/energy/history/file/upload", HTTP_POST,
         std::bind(&WebApiEnergyHistoryFileClass::onFileUploadFinish, this, _1),
         std::bind(&WebApiEnergyHistoryFileClass::onFileUpload, this, _1, _2, _3, _4, _5, _6));
@@ -97,6 +98,33 @@ void WebApiEnergyHistoryFileClass::onFileDownload(AsyncWebServerRequest* request
     file.close();
 
     request->send(LittleFS, path, asyncsrv::T_application_octet_stream, true);
+}
+
+void WebApiEnergyHistoryFileClass::onFileDelete(AsyncWebServerRequest* request)
+{
+    if (!WebApi.checkCredentials(request)) {
+        return;
+    }
+
+    String path;
+    if (!getManagedPath(request, path)) {
+        sendJsonMessage(request, 400, "warning", "Invalid energy history file path", WebApiError::GenericValueMissing);
+        return;
+    }
+
+    File file = LittleFS.open(path, "r", false);
+    if (!file || file.isDirectory()) {
+        sendJsonMessage(request, 404, "warning", "Energy history file not found", WebApiError::GenericNoValueFound);
+        return;
+    }
+    file.close();
+
+    if (!LittleFS.remove(path)) {
+        sendJsonMessage(request, 500, "danger", "Energy history file delete failed", WebApiError::GenericWriteFailed);
+        return;
+    }
+
+    sendJsonMessage(request, 200, "success", "Energy history file deleted", WebApiError::GenericSuccess);
 }
 
 void WebApiEnergyHistoryFileClass::onFileUpload(AsyncWebServerRequest* request, String filename, size_t index, uint8_t* data, size_t len, bool final)
