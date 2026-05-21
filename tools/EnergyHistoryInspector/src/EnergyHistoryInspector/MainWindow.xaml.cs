@@ -7,6 +7,7 @@ namespace EnergyHistoryInspector;
 public partial class MainWindow : Window
 {
     private readonly EnergyHistoryFileParser _parser = new();
+    private readonly EnergyHistoryFileWriter _writer = new();
     private EnergyHistoryFile? _currentFile;
 
     public MainWindow()
@@ -55,6 +56,34 @@ public partial class MainWindow : Window
         }
     }
 
+    private void SaveButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentFile is null)
+        {
+            return;
+        }
+
+        RecordsGrid.CommitEdit(System.Windows.Controls.DataGridEditingUnit.Cell, true);
+        RecordsGrid.CommitEdit(System.Windows.Controls.DataGridEditingUnit.Row, true);
+
+        var message = $"Die Datei wird mit neu berechneten CRCs geschrieben.\n\nDatei: {_currentFile.Scan.FilePath}\nBackup wird vorher erstellt.\n\nFortfahren?";
+        if (MessageBox.Show(this, message, "Energy History speichern", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        try
+        {
+            var backupPath = _writer.Save(_currentFile);
+            StatusText.Text = $"Datei gespeichert. Backup: {backupPath}";
+            LoadFile(_currentFile.Scan.FilePath);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Speichern fehlgeschlagen", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
     private void BlocksGrid_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
     {
         if (BlocksGrid.SelectedItem is EnergyHistoryBlock block)
@@ -87,6 +116,9 @@ public partial class MainWindow : Window
             BlocksGrid.ItemsSource = _currentFile.Blocks;
             RecordsGrid.ItemsSource = _currentFile.Records;
             RepairButton.IsEnabled = _currentFile.Scan.CanTruncateFinalBlock;
+            SaveButton.IsEnabled = _currentFile.Scan.SkippedBlocks == 0
+                && !_currentFile.Scan.InvalidFinalBlock
+                && !_currentFile.Scan.CanTruncateFinalBlock;
             StatusText.Text = "Datei geladen.";
         }
         catch (Exception ex)
@@ -95,6 +127,7 @@ public partial class MainWindow : Window
             BlocksGrid.ItemsSource = null;
             RecordsGrid.ItemsSource = null;
             RepairButton.IsEnabled = false;
+            SaveButton.IsEnabled = false;
             StatusText.Text = "Fehler beim Laden.";
             MessageBox.Show(this, ex.Message, "Datei konnte nicht gelesen werden", MessageBoxButton.OK, MessageBoxImage.Error);
         }

@@ -17,6 +17,7 @@
 
         <DockPanel Grid.Row="0" LastChildFill="True" Margin="0,0,0,12">
             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                <Button x:Name="SaveButton" Content="Speichern" Width="110" Margin="0,0,8,0" Click="SaveButton_Click" IsEnabled="False" />
                 <Button x:Name="RepairButton" Content="Reparieren" Width="110" Margin="0,0,8,0" Click="RepairButton_Click" IsEnabled="False" />
                 <Button Content="Datei oeffnen" Width="120" Click="OpenButton_Click" />
             </StackPanel>
@@ -77,18 +78,22 @@
         </GroupBox>
 
         <GroupBox Grid.Row="3" Header="Datensaetze">
-            <DataGrid x:Name="RecordsGrid" AutoGenerateColumns="False" IsReadOnly="True">
+            <DataGrid x:Name="RecordsGrid" AutoGenerateColumns="False" IsReadOnly="False" CanUserAddRows="False" CanUserDeleteRows="False">
                 <DataGrid.Columns>
-                    <DataGridTextColumn Header="#" Binding="{Binding Number}" Width="60" />
-                    <DataGridTextColumn Header="Key" Binding="{Binding Key}" Width="140" />
+                    <DataGridTextColumn Header="#" Binding="{Binding Number}" IsReadOnly="True" Width="60" />
+                    <DataGridTextColumn Header="Key" Binding="{Binding Key}" IsReadOnly="True" Width="140" />
+                    <DataGridTextColumn Header="Day" Binding="{Binding Day}" Width="70" />
+                    <DataGridTextColumn Header="Slot" Binding="{Binding Slot}" Width="70" />
+                    <DataGridTextColumn Header="DayOfYear" Binding="{Binding DayOfYear}" Width="90" />
+                    <DataGridTextColumn Header="Month" Binding="{Binding Month}" Width="70" />
                     <DataGridTextColumn Header="Yield Wh" Binding="{Binding YieldWh}" Width="110" />
                     <DataGridTextColumn Header="Max W" Binding="{Binding MaxPowerW}" Width="90" />
                     <DataGridTextColumn Header="Avg W" Binding="{Binding AvgPowerW}" Width="90" />
                     <DataGridTextColumn Header="Runtime min" Binding="{Binding RuntimeMin}" Width="110" />
                     <DataGridTextColumn Header="Count" Binding="{Binding Count}" Width="80" />
                     <DataGridTextColumn Header="Flags" Binding="{Binding Flags}" Width="160" />
-                    <DataGridCheckBoxColumn Header="Gueltig" Binding="{Binding IsValid}" Width="80" />
-                    <DataGridTextColumn Header="Raw" Binding="{Binding Raw}" Width="*" />
+                    <DataGridCheckBoxColumn Header="Gueltig" Binding="{Binding IsValid}" IsReadOnly="True" Width="80" />
+                    <DataGridTextColumn Header="Raw" Binding="{Binding Raw}" IsReadOnly="True" Width="*" />
                 </DataGrid.Columns>
             </DataGrid>
         </GroupBox>

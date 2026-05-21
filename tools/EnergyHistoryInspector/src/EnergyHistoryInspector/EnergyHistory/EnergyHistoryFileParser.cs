@@ -240,7 +240,17 @@ public sealed class EnergyHistoryFileParser
             && slot < FiveMinuteSlotsPerDay
             && (flags & ~KnownRecordFlagsMask) == 0;
 
-        return new EnergyHistoryRecord(number, $"Tag {day}, Slot {slot}", yieldDayWh, 0, 0, 0, 0, (EnergyHistoryRecordFlags)flags, isValid, ToHex(input));
+        return new EnergyHistoryRecord
+        {
+            Number = number,
+            Key = $"Tag {day}, Slot {slot}",
+            Day = day,
+            Slot = slot,
+            YieldWh = yieldDayWh,
+            Flags = (EnergyHistoryRecordFlags)flags,
+            IsValid = isValid,
+            Raw = ToHex(input),
+        };
     }
 
     private static EnergyHistoryRecord DecodeDayRecord(int number, ReadOnlySpan<byte> input)
@@ -256,7 +266,20 @@ public sealed class EnergyHistoryFileParser
             && (flags & 0xff00) == 0
             && (flags & ~KnownRecordFlagsMask) == 0;
 
-        return new EnergyHistoryRecord(number, $"Tag {dayOfYear}", yieldWh, maxPowerW, avgPowerW, runtimeMin, sampleCount, (EnergyHistoryRecordFlags)flags, isValid, ToHex(input));
+        return new EnergyHistoryRecord
+        {
+            Number = number,
+            Key = $"Tag {dayOfYear}",
+            DayOfYear = dayOfYear,
+            YieldWh = yieldWh,
+            MaxPowerW = maxPowerW,
+            AvgPowerW = avgPowerW,
+            RuntimeMin = runtimeMin,
+            Count = sampleCount,
+            Flags = (EnergyHistoryRecordFlags)flags,
+            IsValid = isValid,
+            Raw = ToHex(input),
+        };
     }
 
     private static EnergyHistoryRecord DecodeMonthRecord(int number, ReadOnlySpan<byte> input)
@@ -274,7 +297,20 @@ public sealed class EnergyHistoryFileParser
             && (flags & 0xff00) == 0
             && (flags & ~KnownRecordFlagsMask) == 0;
 
-        return new EnergyHistoryRecord(number, $"Monat {month}", yieldWh, maxPowerW, avgPowerW, runtimeMin, dayCount, (EnergyHistoryRecordFlags)flags, isValid, ToHex(input));
+        return new EnergyHistoryRecord
+        {
+            Number = number,
+            Key = $"Monat {month}",
+            Month = month,
+            YieldWh = yieldWh,
+            MaxPowerW = maxPowerW,
+            AvgPowerW = avgPowerW,
+            RuntimeMin = runtimeMin,
+            Count = dayCount,
+            Flags = (EnergyHistoryRecordFlags)flags,
+            IsValid = isValid,
+            Raw = ToHex(input),
+        };
     }
 
     private static void AddInvalidFinalBlock(EnergyHistoryFile file, long blockOffset, string message)

@@ -45,17 +45,23 @@ public sealed record EnergyHistoryBlockHeader(
     uint PayloadCrc,
     long Offset);
 
-public sealed record EnergyHistoryRecord(
-    int Number,
-    string Key,
-    uint YieldWh,
-    ushort MaxPowerW,
-    ushort AvgPowerW,
-    ushort RuntimeMin,
-    ushort Count,
-    EnergyHistoryRecordFlags Flags,
-    bool IsValid,
-    string Raw);
+public sealed class EnergyHistoryRecord
+{
+    public int Number { get; init; }
+    public string Key { get; set; } = string.Empty;
+    public byte Day { get; set; }
+    public ushort Slot { get; set; }
+    public ushort DayOfYear { get; set; }
+    public byte Month { get; set; }
+    public uint YieldWh { get; set; }
+    public ushort MaxPowerW { get; set; }
+    public ushort AvgPowerW { get; set; }
+    public ushort RuntimeMin { get; set; }
+    public ushort Count { get; set; }
+    public EnergyHistoryRecordFlags Flags { get; set; }
+    public bool IsValid { get; set; }
+    public string Raw { get; set; } = string.Empty;
+}
 
 public sealed class EnergyHistoryBlock
 {
