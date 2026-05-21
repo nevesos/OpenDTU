@@ -716,6 +716,8 @@
         "Chart": "Graphique",
         "Results": "Resultats",
         "FilesScanned": "Fichiers analyses",
+        "HistoryFiles": "Fichiers historique",
+        "HistoryFileSize": "Taille historique",
         "ValidBlocks": "Blocs valides",
         "SkippedBlocks": "Blocs ignores",
         "ValidRecords": "Enregistrements valides",

@@ -350,20 +350,12 @@ export default defineComponent({
         statusTiles(): { label: string; value: string; detail?: string }[] {
             return [
                 {
-                    label: this.$t('energyhistory.FilesScanned'),
+                    label: this.$t('energyhistory.HistoryFiles'),
                     value: this.$n(statusValue(this.status.files_scanned)),
                 },
                 {
-                    label: this.$t('energyhistory.ValidBlocks'),
-                    value: this.$n(statusValue(this.status.valid_blocks)),
-                },
-                {
-                    label: this.$t('energyhistory.SkippedBlocks'),
-                    value: this.$n(statusValue(this.status.skipped_blocks)),
-                },
-                {
-                    label: this.$t('energyhistory.ValidRecords'),
-                    value: this.$n(statusValue(this.status.valid_records)),
+                    label: this.$t('energyhistory.HistoryFileSize'),
+                    value: this.formatBytes(statusValue(this.status.bytes_scanned)),
                 },
                 {
                     label: this.$t('energyhistory.LittleFsUsed'),

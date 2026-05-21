@@ -729,6 +729,8 @@
         "Chart": "Diagramm",
         "Results": "Ergebnisse",
         "FilesScanned": "Dateien gelesen",
+        "HistoryFiles": "History-Dateien",
+        "HistoryFileSize": "History-Groesse",
         "ValidBlocks": "Gültige Blöcke",
         "SkippedBlocks": "Übersprungene Blöcke",
         "ValidRecords": "Gültige Datensätze",

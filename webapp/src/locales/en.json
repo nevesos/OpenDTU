@@ -730,6 +730,8 @@
         "Chart": "Chart",
         "Results": "Results",
         "FilesScanned": "Files scanned",
+        "HistoryFiles": "History files",
+        "HistoryFileSize": "History size",
         "ValidBlocks": "Valid blocks",
         "SkippedBlocks": "Skipped blocks",
         "ValidRecords": "Valid records",
