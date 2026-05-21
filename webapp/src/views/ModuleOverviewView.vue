@@ -705,11 +705,26 @@ export default defineComponent({
                     this.liveData = data;
                     this.liveData.inverters?.forEach((inverter) => this.resetDataAging(inverter));
                     this.ensureModulePositions();
+                    return this.getInitialInverterDetails(this.liveData.inverters || []);
+                })
+                .finally(() => {
                     if (triggerLoading) {
                         this.dataLoading = false;
-                        this.updateCanvasAvailableHeightAfterRender();
                     }
+                    this.updateCanvasAvailableHeightAfterRender();
                 });
+        },
+        getInitialInverterDetails(inverters: Inverter[]): Promise<void> {
+            const detailRequests = inverters.map((inverter) =>
+                fetch(`/api/livedata/status?inv=${encodeURIComponent(inverter.serial)}`, { headers: authHeader() })
+                    .then((response) => handleResponse(response, this.$emitter, this.$router))
+                    .then((data) => {
+                        this.mergeLiveData(data);
+                    })
+                    .catch(() => undefined)
+            );
+
+            return Promise.all(detailRequests).then(() => undefined);
         },
         reloadData() {
             this.socket?.close();
@@ -745,23 +760,39 @@ export default defineComponent({
             }
 
             const newData = JSON.parse(event.data);
+            this.mergeLiveData(newData, true);
+        },
+        mergeLiveData(newData: LiveData, signalUpdates: boolean = false) {
             if (!this.liveData.inverters) {
                 this.liveData.inverters = [];
             }
 
-            Object.assign(this.liveData.total || {}, newData.total);
-            Object.assign(this.liveData.hints || {}, newData.hints);
-
-            const updatedInverter = newData.inverters[0];
-            this.signalInverterUpdate(updatedInverter.serial);
-
-            const idx = this.liveData.inverters.findIndex((i) => i.serial === updatedInverter.serial);
-            if (idx === -1) {
-                this.liveData.inverters.push(updatedInverter);
-            } else if (this.liveData.inverters[idx] !== undefined) {
-                Object.assign(this.liveData.inverters[idx], updatedInverter);
+            if (newData.total) {
+                this.liveData.total = {
+                    ...this.liveData.total,
+                    ...newData.total,
+                };
             }
-            this.resetDataAging(updatedInverter);
+            if (newData.hints) {
+                this.liveData.hints = {
+                    ...this.liveData.hints,
+                    ...newData.hints,
+                };
+            }
+
+            (newData.inverters || []).forEach((updatedInverter) => {
+                if (signalUpdates) {
+                    this.signalInverterUpdate(updatedInverter.serial);
+                }
+
+                const idx = this.liveData.inverters.findIndex((i) => i.serial === updatedInverter.serial);
+                if (idx === -1) {
+                    this.liveData.inverters.push(updatedInverter);
+                } else if (this.liveData.inverters[idx] !== undefined) {
+                    Object.assign(this.liveData.inverters[idx], updatedInverter);
+                }
+                this.resetDataAging(updatedInverter);
+            });
 
             this.ensureModulePositions();
             this.updateCanvasAvailableHeightAfterRender();
