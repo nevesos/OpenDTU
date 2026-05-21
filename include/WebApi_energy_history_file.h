@@ -10,6 +10,7 @@ public:
 
 private:
     void onFileList(AsyncWebServerRequest* request);
+    void onFileScan(AsyncWebServerRequest* request);
     void onFileDownload(AsyncWebServerRequest* request);
     void onFileDelete(AsyncWebServerRequest* request);
     void onFileUploadFinish(AsyncWebServerRequest* request);

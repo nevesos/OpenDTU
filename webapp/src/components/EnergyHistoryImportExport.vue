@@ -75,6 +75,15 @@
                             </button>
                             <button
                                 type="button"
+                                class="btn btn-outline-secondary btn-sm ms-1"
+                                :disabled="deepScanLoadingPath === file.path"
+                                :title="$t('energyhistory.DeepScan')"
+                                @click.stop="deepScanFile(file)"
+                            >
+                                <BIconSearch />
+                            </button>
+                            <button
+                                type="button"
                                 class="btn btn-outline-danger btn-sm ms-1"
                                 :title="$t('energyhistory.Delete')"
                                 @click.stop="deleteFile(file)"
@@ -118,6 +127,40 @@
                         <strong>{{ $t('energyhistory.FileSize') }}:</strong>
                         <span class="ms-2">{{ formatBytes(selectedFile.size) }}</span>
                     </div>
+                </div>
+
+                <div class="energy-history-file-scan mt-3" v-if="selectedFileDeepScan && selectedFileDeepScanPath === selectedFile.path">
+                    <div class="fw-semibold mb-2">{{ $t('energyhistory.DeepScanResult') }}</div>
+                    <div class="row g-2 small">
+                        <div class="col-auto">
+                            <strong>{{ $t('energyhistory.ValidBlocks') }}:</strong>
+                            <span class="ms-2">{{ $n(selectedFileDeepScan.scan.valid_blocks || 0) }}</span>
+                        </div>
+                        <div class="col-auto">
+                            <strong>{{ $t('energyhistory.SkippedBlocks') }}:</strong>
+                            <span class="ms-2">{{ $n(selectedFileDeepScan.scan.skipped_blocks || 0) }}</span>
+                        </div>
+                        <div class="col-auto">
+                            <strong>{{ $t('energyhistory.ValidRecords') }}:</strong>
+                            <span class="ms-2">{{ $n(selectedFileDeepScan.scan.valid_records || 0) }}</span>
+                        </div>
+                        <div class="col-auto">
+                            <strong>{{ $t('energyhistory.FileSize') }}:</strong>
+                            <span class="ms-2">{{ formatBytes(selectedFileDeepScan.scan.file_size || 0) }}</span>
+                        </div>
+                        <div class="col-auto">
+                            <strong>{{ $t('energyhistory.InvalidFinalBlock') }}:</strong>
+                            <span class="ms-2">{{ selectedFileDeepScan.scan.invalid_final_block ? $t('base.Yes') : $t('base.No') }}</span>
+                        </div>
+                        <div class="col-auto">
+                            <strong>{{ $t('energyhistory.CanTruncateFinalBlock') }}:</strong>
+                            <span class="ms-2">{{ selectedFileDeepScan.scan.can_truncate_final_block ? $t('base.Yes') : $t('base.No') }}</span>
+                        </div>
+                    </div>
+                    <details class="mt-2">
+                        <summary>{{ $t('energyhistory.RawData') }}</summary>
+                        <pre class="energy-history-raw-data mt-2 mb-0">{{ formatDeepScan(selectedFileDeepScan) }}</pre>
+                    </details>
                 </div>
                 <div class="row g-2 mt-3" v-if="selectedFilePreviewResolution === '5m'">
                     <div class="col-12 col-sm-4 col-lg-3">
@@ -188,7 +231,7 @@
 import BootstrapAlert from '@/components/BootstrapAlert.vue';
 import CardElement from '@/components/CardElement.vue';
 import { authHeader, handleResponse } from '@/utils/authentication';
-import { BIconArrowClockwise, BIconDownload, BIconTrash, BIconUpload } from 'bootstrap-icons-vue';
+import { BIconArrowClockwise, BIconDownload, BIconSearch, BIconTrash, BIconUpload } from 'bootstrap-icons-vue';
 import { defineComponent } from 'vue';
 
 interface EnergyHistoryFile {
@@ -244,6 +287,23 @@ interface EnergyHistoryResponse {
     code?: number;
 }
 
+interface EnergyHistoryFileScan {
+    files_scanned?: number;
+    valid_blocks?: number;
+    skipped_blocks?: number;
+    valid_records?: number;
+    skipped_records?: number;
+    file_size?: number;
+    last_valid_offset?: number;
+    invalid_final_block?: boolean;
+    can_truncate_final_block?: boolean;
+}
+
+interface EnergyHistoryFileScanResponse {
+    file?: string;
+    scan: EnergyHistoryFileScan;
+}
+
 interface EnergyHistoryFileListResponse {
     files?: EnergyHistoryFile[];
 }
@@ -261,6 +321,7 @@ export default defineComponent({
         CardElement,
         BIconArrowClockwise,
         BIconDownload,
+        BIconSearch,
         BIconTrash,
         BIconUpload,
     },
@@ -274,6 +335,9 @@ export default defineComponent({
             selectedFile: null as EnergyHistoryFile | null,
             selectedFileRows: [] as EnergyHistoryRow[],
             selectedFileRawData: null as EnergyHistoryResponse | null,
+            selectedFileDeepScan: null as EnergyHistoryFileScanResponse | null,
+            selectedFileDeepScanPath: '',
+            deepScanLoadingPath: '',
             selectedFileQuery: null as EnergyHistoryFileQuery | null,
             selectedFilePreviewDate: '',
             selectedFilePreviewLoading: false,
@@ -379,6 +443,8 @@ export default defineComponent({
                         this.selectedFile = null;
                         this.selectedFileRows = [];
                         this.selectedFileRawData = null;
+                        this.selectedFileDeepScan = null;
+                        this.selectedFileDeepScanPath = '';
                         this.selectedFileQuery = null;
                         this.selectedFilePreviewDate = '';
                     }
@@ -393,6 +459,10 @@ export default defineComponent({
         selectFile(file: EnergyHistoryFile) {
             this.selectedFilePath = file.path;
             this.selectedFile = file;
+            if (this.selectedFileDeepScanPath !== file.path) {
+                this.selectedFileDeepScan = null;
+                this.selectedFileDeepScanPath = '';
+            }
             this.selectedFileQuery = this.parseFileQuery(file.path);
             this.selectedFilePreviewDate = this.selectedFileQuery?.date || '';
             this.loadSelectedFilePreview();
@@ -582,6 +652,8 @@ export default defineComponent({
                         this.selectedFile = null;
                         this.selectedFileRows = [];
                         this.selectedFileRawData = null;
+                        this.selectedFileDeepScan = null;
+                        this.selectedFileDeepScanPath = '';
                         this.selectedFileQuery = null;
                         this.selectedFilePreviewDate = '';
                     }
@@ -594,6 +666,36 @@ export default defineComponent({
                         type: 'danger',
                         message: String(this.$t('energyhistory.DeleteFailed')),
                     };
+                });
+        },
+        deepScanFile(file: EnergyHistoryFile) {
+            this.selectedFilePath = file.path;
+            this.selectedFile = file;
+            this.selectedFileQuery = this.parseFileQuery(file.path);
+            this.selectedFilePreviewDate = this.selectedFileQuery?.date || '';
+            this.loadSelectedFilePreview();
+            this.deepScanLoadingPath = file.path;
+
+            const params = new URLSearchParams();
+            params.set('file', file.path);
+
+            fetch('/api/energy/history/file/scan?' + params.toString(), { headers: authHeader() })
+                .then((response) => handleResponse(response, this.$emitter, this.$router))
+                .then((data: EnergyHistoryFileScanResponse) => {
+                    this.selectedFileDeepScan = data;
+                    this.selectedFileDeepScanPath = file.path;
+                })
+                .catch(() => {
+                    this.alert = {
+                        show: true,
+                        type: 'danger',
+                        message: String(this.$t('energyhistory.DeepScanFailed')),
+                    };
+                    this.selectedFileDeepScan = null;
+                    this.selectedFileDeepScanPath = '';
+                })
+                .finally(() => {
+                    this.deepScanLoadingPath = '';
                 });
         },
         onUploadFileSelected(event: Event) {
@@ -660,6 +762,9 @@ export default defineComponent({
         },
         formatRawRow(row: EnergyHistoryRow): string {
             return JSON.stringify(row, null, 2);
+        },
+        formatDeepScan(scan: EnergyHistoryFileScanResponse): string {
+            return JSON.stringify(scan, null, 2);
         },
         selectedFileFirstColumnValue(row: EnergyHistoryRow): string {
             if (this.selectedFilePreviewResolution === '5m') {
@@ -733,6 +838,13 @@ export default defineComponent({
     border: 1px solid var(--bs-border-color);
     border-radius: var(--bs-border-radius);
     background: var(--bs-tertiary-bg);
+}
+
+.energy-history-file-scan {
+    padding: 0.75rem;
+    border: 1px solid var(--bs-border-color);
+    border-radius: var(--bs-border-radius);
+    background: var(--bs-body-bg);
 }
 
 .energy-history-raw-data {
