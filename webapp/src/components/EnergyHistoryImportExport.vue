@@ -1,5 +1,13 @@
 <template>
     <CardElement :text="$t('energyhistory.DataManagement')" textVariant="text-bg-primary" add-space table>
+        <div class="d-flex justify-content-end px-3 pt-3">
+            <button type="button" class="btn btn-outline-secondary btn-sm" @click="dataManagementExpanded = !dataManagementExpanded">
+                <BIconChevronUp v-if="dataManagementExpanded" class="me-1" />
+                <BIconChevronDown v-else class="me-1" />
+                {{ dataManagementExpanded ? $t('energyhistory.HideDataManagement') : $t('energyhistory.ShowDataManagement') }}
+            </button>
+        </div>
+
         <div class="px-3 pt-3">
             <BootstrapAlert
                 v-model="alert.show"
@@ -12,7 +20,7 @@
             </BootstrapAlert>
         </div>
 
-        <div class="row g-3 px-3 pb-3 align-items-end">
+        <div v-show="dataManagementExpanded" class="row g-3 px-3 pb-3 align-items-end">
             <div class="col-12 col-lg-5">
                 <label class="form-label" for="energy-history-import-file">{{ $t('energyhistory.ImportFile') }}</label>
                 <input
@@ -54,108 +62,116 @@
             <div class="progress" role="progressbar" :aria-valuenow="uploadProgressPercent" aria-valuemin="0" aria-valuemax="100">
                 <div class="progress-bar" :style="{ width: uploadProgressPercent + '%' }"></div>
             </div>
-            <div class="text-muted small mt-1">
-                {{ formatBytes(uploadProgress.loadedBytes) }} / {{ formatBytes(uploadProgress.totalBytes) }}
-                <span v-if="uploadProgress.retryCount > 0">
-                    - {{ $t('energyhistory.UploadRetry', { count: uploadProgress.retryCount }) }}
-                </span>
+            <div class="d-flex flex-wrap gap-2 justify-content-between align-items-center mt-1">
+                <div class="text-muted small">
+                    {{ formatBytes(uploadProgress.loadedBytes) }} / {{ formatBytes(uploadProgress.totalBytes) }}
+                    <span v-if="uploadProgress.retryCount > 0">
+                        - {{ $t('energyhistory.UploadRetry', { count: uploadProgress.retryCount }) }}
+                    </span>
+                </div>
+                <button v-if="uploading" type="button" class="btn btn-outline-danger btn-sm" @click="cancelUpload">
+                    <BIconXCircle class="me-1" />
+                    {{ $t('energyhistory.CancelUpload') }}
+                </button>
             </div>
         </div>
 
-        <div class="d-flex flex-wrap gap-2 px-3 pb-3 align-items-center">
-            <button
-                type="button"
-                class="btn btn-outline-primary btn-sm"
-                :disabled="downloadingSelected || selectedBulkFiles.length === 0"
-                @click="downloadSelectedFiles"
-            >
-                <BIconDownload class="me-1" />
-                {{ downloadingSelected ? $t('energyhistory.Downloading') : $t('energyhistory.DownloadSelected', { count: selectedBulkFiles.length }) }}
-            </button>
-            <span class="text-muted small" v-if="selectedBulkFiles.length > 0">
-                {{ $t('energyhistory.FilesSelected', { count: selectedBulkFiles.length }) }}
-            </span>
-        </div>
+        <template v-if="dataManagementExpanded">
+            <div class="d-flex flex-wrap gap-2 px-3 pb-3 align-items-center">
+                <button
+                    type="button"
+                    class="btn btn-outline-primary btn-sm"
+                    :disabled="downloadingSelected || selectedBulkFiles.length === 0"
+                    @click="downloadSelectedFiles"
+                >
+                    <BIconDownload class="me-1" />
+                    {{ downloadingSelected ? $t('energyhistory.Downloading') : $t('energyhistory.DownloadSelected', { count: selectedBulkFiles.length }) }}
+                </button>
+                <span class="text-muted small" v-if="selectedBulkFiles.length > 0">
+                    {{ $t('energyhistory.FilesSelected', { count: selectedBulkFiles.length }) }}
+                </span>
+            </div>
 
-        <div class="table-responsive">
-            <table class="table table-hover table-condensed align-middle mb-0">
-                <thead>
-                    <tr>
-                        <th class="energy-history-file-select text-center">
-                            <input
-                                class="form-check-input"
-                                type="checkbox"
-                                :checked="allFilesSelected"
-                                :disabled="files.length === 0"
-                                @change="toggleAllFiles(($event.target as HTMLInputElement).checked)"
-                            />
-                        </th>
-                        <th>{{ $t('energyhistory.FilePath') }}</th>
-                        <th class="text-end">{{ $t('energyhistory.FileSize') }}</th>
-                        <th class="text-end">
-                            <button type="button" class="btn btn-outline-secondary btn-sm" :disabled="loading" @click="loadFiles">
-                                <BIconArrowClockwise />
-                            </button>
-                        </th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr
-                        v-for="file in files"
-                        :key="file.path"
-                        class="energy-history-file-row"
-                        :class="{ 'table-active': selectedFilePath === file.path }"
-                        @click="selectFile(file)"
-                    >
-                        <td class="energy-history-file-select text-center" @click.stop>
-                            <input
-                                class="form-check-input"
-                                type="checkbox"
-                                :checked="selectedBulkFilePaths.includes(file.path)"
-                                @change="toggleFileSelection(file.path, ($event.target as HTMLInputElement).checked)"
-                            />
-                        </td>
-                        <td class="text-break">{{ file.path }}</td>
-                        <td class="text-end text-nowrap">{{ formatBytes(file.size) }}</td>
-                        <td class="text-end">
-                            <button
-                                type="button"
-                                class="btn btn-outline-primary btn-sm"
-                                :title="$t('energyhistory.Download')"
-                                @click.stop="downloadFile(file).catch(() => undefined)"
-                            >
-                                <BIconDownload />
-                            </button>
-                            <button
-                                type="button"
-                                class="btn btn-outline-secondary btn-sm ms-1"
-                                :disabled="deepScanLoadingPath === file.path"
-                                :title="$t('energyhistory.DeepScan')"
-                                @click.stop="deepScanFile(file)"
-                            >
-                                <BIconSearch />
-                            </button>
-                            <button
-                                type="button"
-                                class="btn btn-outline-danger btn-sm ms-1"
-                                :title="$t('energyhistory.Delete')"
-                                @click.stop="deleteFile(file)"
-                            >
-                                <BIconTrash />
-                            </button>
-                        </td>
-                    </tr>
-                    <tr v-if="!loading && files.length === 0">
-                        <td colspan="4" class="text-center text-muted">{{ $t('energyhistory.NoFiles') }}</td>
-                    </tr>
-                    <tr v-if="loading">
-                        <td colspan="4" class="text-center text-muted">{{ $t('base.Loading') }}</td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
+            <div class="table-responsive">
+                <table class="table table-hover table-condensed align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th class="energy-history-file-select text-center">
+                                <input
+                                    class="form-check-input"
+                                    type="checkbox"
+                                    :checked="allFilesSelected"
+                                    :disabled="files.length === 0"
+                                    @change="toggleAllFiles(($event.target as HTMLInputElement).checked)"
+                                />
+                            </th>
+                            <th>{{ $t('energyhistory.FilePath') }}</th>
+                            <th class="text-end">{{ $t('energyhistory.FileSize') }}</th>
+                            <th class="text-end">
+                                <button type="button" class="btn btn-outline-secondary btn-sm" :disabled="loading" @click="loadFiles">
+                                    <BIconArrowClockwise />
+                                </button>
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr
+                            v-for="file in files"
+                            :key="file.path"
+                            class="energy-history-file-row"
+                            :class="{ 'table-active': selectedFilePath === file.path }"
+                            @click="selectFile(file)"
+                        >
+                            <td class="energy-history-file-select text-center" @click.stop>
+                                <input
+                                    class="form-check-input"
+                                    type="checkbox"
+                                    :checked="selectedBulkFilePaths.includes(file.path)"
+                                    @change="toggleFileSelection(file.path, ($event.target as HTMLInputElement).checked)"
+                                />
+                            </td>
+                            <td class="text-break">{{ file.path }}</td>
+                            <td class="text-end text-nowrap">{{ formatBytes(file.size) }}</td>
+                            <td class="text-end">
+                                <button
+                                    type="button"
+                                    class="btn btn-outline-primary btn-sm"
+                                    :title="$t('energyhistory.Download')"
+                                    @click.stop="downloadFile(file).catch(() => undefined)"
+                                >
+                                    <BIconDownload />
+                                </button>
+                                <button
+                                    type="button"
+                                    class="btn btn-outline-secondary btn-sm ms-1"
+                                    :disabled="deepScanLoadingPath === file.path"
+                                    :title="$t('energyhistory.DeepScan')"
+                                    @click.stop="deepScanFile(file)"
+                                >
+                                    <BIconSearch />
+                                </button>
+                                <button
+                                    type="button"
+                                    class="btn btn-outline-danger btn-sm ms-1"
+                                    :title="$t('energyhistory.Delete')"
+                                    @click.stop="deleteFile(file)"
+                                >
+                                    <BIconTrash />
+                                </button>
+                            </td>
+                        </tr>
+                        <tr v-if="!loading && files.length === 0">
+                            <td colspan="4" class="text-center text-muted">{{ $t('energyhistory.NoFiles') }}</td>
+                        </tr>
+                        <tr v-if="loading">
+                            <td colspan="4" class="text-center text-muted">{{ $t('base.Loading') }}</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </template>
 
-        <div class="px-3 py-3" v-if="selectedFile">
+        <div class="px-3 py-3" v-if="dataManagementExpanded && selectedFile">
             <div class="energy-history-file-details">
                 <div class="small text-muted">{{ $t('energyhistory.SelectedFile') }}</div>
                 <div class="fw-semibold text-break">{{ selectedFile.path }}</div>
@@ -295,7 +311,7 @@
 import BootstrapAlert from '@/components/BootstrapAlert.vue';
 import CardElement from '@/components/CardElement.vue';
 import { authHeader, handleResponse } from '@/utils/authentication';
-import { BIconArrowClockwise, BIconDownload, BIconSearch, BIconTrash, BIconUpload } from 'bootstrap-icons-vue';
+import { BIconArrowClockwise, BIconChevronDown, BIconChevronUp, BIconDownload, BIconSearch, BIconTrash, BIconUpload, BIconXCircle } from 'bootstrap-icons-vue';
 import { defineComponent } from 'vue';
 
 interface EnergyHistoryFile {
@@ -395,10 +411,13 @@ export default defineComponent({
         BootstrapAlert,
         CardElement,
         BIconArrowClockwise,
+        BIconChevronDown,
+        BIconChevronUp,
         BIconDownload,
         BIconSearch,
         BIconTrash,
         BIconUpload,
+        BIconXCircle,
     },
     emits: ['changed'],
     data() {
@@ -406,6 +425,7 @@ export default defineComponent({
             loading: false,
             uploading: false,
             downloadingSelected: false,
+            dataManagementExpanded: false,
             files: [] as EnergyHistoryFile[],
             selectedBulkFilePaths: [] as string[],
             selectedFilePath: '',
@@ -422,6 +442,8 @@ export default defineComponent({
             uploadFile: null as File | null,
             uploadFiles: [] as File[],
             uploadPath: '',
+            uploadAbortRequested: false,
+            currentUploadRequest: null as XMLHttpRequest | null,
             uploadProgress: {
                 currentFile: 0,
                 totalFiles: 0,
@@ -898,17 +920,28 @@ export default defineComponent({
             }
             this.resetUploadProgress();
         },
+        cancelUpload() {
+            this.uploadAbortRequested = true;
+            if (this.currentUploadRequest) {
+                this.currentUploadRequest.abort();
+            }
+        },
         uploadSelectedFile() {
             if (this.uploadFiles.length === 0) {
                 return;
             }
 
             this.uploading = true;
+            this.uploadAbortRequested = false;
+            this.currentUploadRequest = null;
             const files = this.uploadFiles.slice();
             this.startUploadProgress(files);
             files.reduce(
                 (previous, file, index) => previous
-                    .then(() => this.uploadOneFileWithRetry(file, files.length === 1 ? this.uploadPath : this.uploadPathForFile(file), index, 0))
+                    .then(() => {
+                        this.throwIfUploadCancelled();
+                        return this.uploadOneFileWithRetry(file, files.length === 1 ? this.uploadPath : this.uploadPathForFile(file), index, 0);
+                    })
                     .then(() => this.delay(250)),
                 Promise.resolve(),
             )
@@ -928,18 +961,35 @@ export default defineComponent({
                     this.$emit('changed');
                     return this.loadFiles();
                 })
-                .catch(() => {
+                .catch((error: Error & { status?: number }) => {
+                    if (this.isUploadCancelled(error)) {
+                        this.alert = {
+                            show: true,
+                            type: 'warning',
+                            message: String(this.$t('energyhistory.UploadCancelled')),
+                        };
+                        if (this.uploadProgress.completedBytes > 0) {
+                            this.$emit('changed');
+                            return this.loadFiles();
+                        }
+                        return undefined;
+                    }
+
                     this.alert = {
                         show: true,
                         type: 'danger',
                         message: String(this.$t('energyhistory.UploadFailed')),
                     };
+                    return undefined;
                 })
                 .finally(() => {
                     this.uploading = false;
+                    this.uploadAbortRequested = false;
+                    this.currentUploadRequest = null;
                 });
         },
         uploadOneFileWithRetry(file: File, path: string, index: number, attempt: number): Promise<void> {
+            this.throwIfUploadCancelled();
             this.uploadProgress.currentFile = index + 1;
             this.uploadProgress.currentName = file.name;
             this.uploadProgress.currentFileLoadedBytes = 0;
@@ -951,17 +1001,25 @@ export default defineComponent({
                     this.uploadProgress.loadedBytes = this.uploadProgress.completedBytes;
                 })
                 .catch((error: Error & { status?: number }) => {
+                    if (this.isUploadCancelled(error)) {
+                        throw error;
+                    }
+
                     const temporaryError = error.status === 502 || error.status === 503 || error.status === 504 || error.status === 0;
                     if (temporaryError && attempt < 2) {
                         this.uploadProgress.retryCount++;
                         return this.delay(1200 + attempt * 1800)
-                            .then(() => this.uploadOneFileWithRetry(file, path, index, attempt + 1));
+                            .then(() => {
+                                this.throwIfUploadCancelled();
+                                return this.uploadOneFileWithRetry(file, path, index, attempt + 1);
+                            });
                     }
 
                     throw error;
                 });
         },
         uploadOneFile(file: File, path: string): Promise<void> {
+            this.throwIfUploadCancelled();
             if (!path) {
                 return Promise.reject(new Error('missing path'));
             }
@@ -974,6 +1032,12 @@ export default defineComponent({
 
             return new Promise((resolve, reject) => {
                 const request = new XMLHttpRequest();
+                this.currentUploadRequest = request;
+                const finish = () => {
+                    if (this.currentUploadRequest === request) {
+                        this.currentUploadRequest = null;
+                    }
+                };
                 request.open('POST', '/api/energy/history/file/upload?' + params.toString());
                 const headers = authHeader();
                 headers.forEach((value, key) => {
@@ -990,6 +1054,7 @@ export default defineComponent({
                 };
 
                 request.onload = () => {
+                    finish();
                     if (request.status >= 200 && request.status < 300) {
                         resolve();
                         return;
@@ -1001,20 +1066,40 @@ export default defineComponent({
                 };
 
                 request.onerror = () => {
+                    finish();
                     const error = new Error('upload failed') as Error & { status?: number };
                     error.status = request.status || 0;
                     reject(error);
                 };
 
                 request.ontimeout = () => {
+                    finish();
                     const error = new Error('upload timeout') as Error & { status?: number };
                     error.status = 504;
                     reject(error);
                 };
 
+                request.onabort = () => {
+                    finish();
+                    reject(this.createUploadCancelledError());
+                };
+
                 request.timeout = 120000;
                 request.send(formData);
             });
+        },
+        createUploadCancelledError(): Error & { status?: number } {
+            const error = new Error('upload cancelled') as Error & { status?: number };
+            error.status = -1;
+            return error;
+        },
+        isUploadCancelled(error: Error & { status?: number }): boolean {
+            return error.status === -1;
+        },
+        throwIfUploadCancelled() {
+            if (this.uploadAbortRequested) {
+                throw this.createUploadCancelledError();
+            }
         },
         startUploadProgress(files: File[]) {
             const totalBytes = files.reduce((sum, file) => sum + file.size, 0);

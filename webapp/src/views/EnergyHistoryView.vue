@@ -163,6 +163,15 @@
                     <div v-else-if="monthlyComparisonLoading" class="text-center text-muted py-4">{{ $t('base.Loading') }}</div>
                     <div v-else-if="monthlyComparisonRequested" class="text-center text-muted py-4">{{ $t('energyhistory.NoData') }}</div>
                 </div>
+                <div class="energy-history-chart mt-4">
+                    <ChartComponent
+                        v-if="monthlyComparisonRequested && !monthlyComparisonLoading && yearlyComparisonHasData"
+                        type="bar"
+                        :data="yearlyComparisonChartData"
+                        :options="yearlyComparisonChartOptions"
+                        :height="220"
+                    />
+                </div>
             </div>
         </CardElement>
 
@@ -367,6 +376,9 @@ export default defineComponent({
         },
         monthlyComparisonHasData(): boolean {
             return this.monthlyComparisonHistories.some((history) => history.data.length > 0);
+        },
+        yearlyComparisonHasData(): boolean {
+            return this.monthlyComparisonHistories.some((history) => this.yearlyComparisonValue(history.data) > 0);
         },
         periodNavigationLabel(): string {
             if (this.query.view === 'day') {
@@ -692,6 +704,59 @@ export default defineComponent({
                         title: {
                             display: true,
                             text: this.$t('energyhistory.MonthlyEnergyKwh'),
+                        },
+                    },
+                },
+            };
+        },
+        yearlyComparisonChartData(): ChartData<'bar', number[], string> {
+            return {
+                labels: this.monthlyComparisonHistories.map((history) => history.label),
+                datasets: [{
+                    type: 'bar' as const,
+                    label: this.$t('energyhistory.YearlyEnergyKwh'),
+                    data: this.monthlyComparisonHistories.map((history) => this.yearlyComparisonValue(history.data)),
+                    borderColor: '#198754',
+                    backgroundColor: this.withAlpha('#198754', 0.7),
+                    borderWidth: 1,
+                }],
+            };
+        },
+        yearlyComparisonChartOptions(): ChartOptions<'bar'> {
+            return {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: true,
+                        position: 'top',
+                    },
+                    tooltip: {
+                        enabled: true,
+                        callbacks: {
+                            label: (item) => {
+                                const value = typeof item.parsed.y === 'number' ? item.parsed.y : 0;
+                                return `${item.dataset.label || ''}: ${this.$n(value)} kWh`;
+                            },
+                        },
+                    },
+                },
+                scales: {
+                    x: {
+                        ticks: {
+                            maxRotation: 0,
+                            autoSkip: true,
+                            maxTicksLimit: 12,
+                        },
+                        grid: {
+                            display: false,
+                        },
+                    },
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: this.$t('energyhistory.YearlyEnergyKwh'),
                         },
                     },
                 },
@@ -1265,6 +1330,9 @@ export default defineComponent({
                 const row = byMonth.get(index + 1);
                 return row ? this.whToKwh(row.yield_wh || 0) : null;
             });
+        },
+        yearlyComparisonValue(rows: EnergyHistoryRow[]): number {
+            return rows.reduce((sum, row) => sum + this.whToKwh(row.yield_wh || 0), 0);
         },
         dailyEnergyLabel(row: EnergyHistoryRow): string {
             const range = this.currentMonthDayRange();
