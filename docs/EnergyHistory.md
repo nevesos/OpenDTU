@@ -3,6 +3,9 @@
 This document defines the first on-flash format for the fork-only persistent
 energy history feature. Data is stored on LittleFS, not in `config.json`.
 
+The feature is enabled only for builds that define `ENERGY_HISTORY_ENABLE`.
+The manual probe build additionally defines `ENERGY_HISTORY_MANUAL_PROBE`.
+
 ## Directory Layout
 
 ```text
@@ -196,6 +199,10 @@ Daily and monthly aggregates should be append/update-log style where practical.
 If duplicate aggregate records exist, the last valid record for the same key
 wins.
 
+Append blocks are intentionally small. Five-minute runtime writes append one
+record per block. Day and month aggregate writers support up to four records per
+block.
+
 Daily aggregates are derived from valid five-minute samples for the completed
 local day. `yieldWh` is the highest daily yield seen for the day. `maxPowerW` is
 derived from the largest positive yield delta between consecutive samples.
@@ -208,6 +215,30 @@ daily max power, and `runtimeMin` is the sum of daily runtime minutes.
 The manual probe build also writes deterministic demo history for API/UI tests
 under June 2099. These files are intentionally persistent and are overwritten on
 the next probe boot.
+
+## Runtime Behaviour
+
+`EnergyHistory.init(scheduler)` registers the five-minute loop task and the
+manual recovery task. The loop task runs every five minutes.
+
+Each runtime sample writes:
+
+```text
+target=total
+target=inv_<serial> for every configured poll-enabled inverter
+```
+
+The total sample uses `Datastore.getTotalAcYieldDayEnabled()`. Per-inverter
+samples use the inverter `YieldDay` value from `TYPE_INV / CH0 / FLD_YD`.
+
+The first loop execution for a new local date finalizes the previously sampled
+local day for total and for every poll-enabled inverter. When the local month
+changed, it also finalizes the previous month.
+
+Runtime startup recovery is not executed automatically from the scheduler,
+because scanning all files can block other scheduler-driven services. Recovery
+can be requested through the Web API. Before appending, a failed append attempts
+to recover a truncatable final block and then retries the append once.
 
 ## Backend Query Surface
 
@@ -223,6 +254,9 @@ month query for one target and a month range
 The five-minute query is day-scoped by design so callers cannot accidentally
 request an unbounded monthly dump.
 
+Queries return deduplicated logical records. If multiple valid records exist for
+the same key, the last valid record wins.
+
 ## Web API
 
 Status:
@@ -230,6 +264,36 @@ Status:
 ```text
 GET /api/energy/history/status
 ```
+
+The status response contains aggregate scan counters and LittleFS usage:
+
+```text
+files_scanned
+valid_blocks
+skipped_blocks
+valid_records
+skipped_records
+invalid_final_block_files
+truncatable_final_block_files
+bytes_scanned
+littlefs_total
+littlefs_used
+recovery.pending
+recovery.running
+recovery.run_count
+recovery.last_started_ms
+recovery.last_finished_ms
+```
+
+Manual recovery:
+
+```text
+POST /api/energy/history/recovery
+```
+
+This schedules a background recovery pass over `/energy/5m`, `/energy/day`,
+and `/energy/month`. A second request while recovery is pending or running
+returns HTTP 409.
 
 History:
 
@@ -241,6 +305,135 @@ GET /api/energy/history?resolution=month&target=total&year=YYYY&from=1&to=12
 
 `target` defaults to `total` and may also be `inv_<serial>`. The five-minute
 endpoint is intentionally limited to one day per request.
+
+Response metadata:
+
+```text
+target
+resolution
+date / year / from / to
+interval_sec        only for 5m
+count
+data[]
+scan
+```
+
+Five-minute rows:
+
+```text
+day
+slot
+yield_wh
+avg_power_w
+flags
+```
+
+Day rows:
+
+```text
+day_of_year
+yield_wh
+max_power_w
+avg_power_w
+runtime_min
+sample_count
+flags
+```
+
+Month rows:
+
+```text
+month
+yield_wh
+max_power_w
+avg_power_w
+runtime_min
+day_count
+flags
+```
+
+## File Management API
+
+The Web API exposes a file-management surface for import/export, diagnostics,
+and manual recovery. All paths are normalized to absolute paths below
+`/energy/`; empty paths, paths ending in `/`, paths containing `..`, paths
+containing `//`, and paths outside `/energy/` are rejected.
+
+List managed files:
+
+```text
+GET /api/energy/history/file/list
+```
+
+Response:
+
+```text
+files[].path
+files[].size
+```
+
+Temporary upload files ending in `.upload` are filtered out of the list.
+
+Deep-scan one managed file:
+
+```text
+GET /api/energy/history/file/scan?file=/energy/5m/total_YYYY_MM.eh5
+```
+
+Recover one managed file by truncating a corrupt or incomplete final block when
+possible:
+
+```text
+POST /api/energy/history/file/recover?file=/energy/5m/total_YYYY_MM.eh5
+```
+
+Download one managed file:
+
+```text
+GET /api/energy/history/file/download?file=/energy/5m/total_YYYY_MM.eh5
+```
+
+Delete one managed file:
+
+```text
+POST /api/energy/history/file/delete?file=/energy/5m/total_YYYY_MM.eh5
+```
+
+Upload and overwrite one managed file:
+
+```text
+POST /api/energy/history/file/upload?file=/energy/5m/total_YYYY_MM.eh5
+```
+
+Uploads are first written to `<target>.upload` and then renamed over the target
+path when the upload finishes.
+
+## Web UI
+
+The energy history view loads `total` plus all configured inverters. Inverter
+target IDs are built from the configured hexadecimal serial converted to the
+decimal `inv_<serial>` form used by the backend.
+
+Available query views:
+
+```text
+Day view      -> resolution=5m, one local date
+Month view    -> resolution=day, day-of-year range for one month
+Year view     -> resolution=month, month range 1..12
+```
+
+The chart overlays total power, per-inverter power, and cumulative total energy.
+For five-minute data the frontend fills the chart axis from the first to the
+last present slot and leaves missing slots as gaps.
+
+A secondary daily-energy chart is loaded for inverter targets for the currently
+selected month. The manual probe demo inverters are shown automatically for
+June 2099 when those targets are not present in the normal inverter list.
+
+The data-management panel can list files, select a file, preview the file
+through the normal history API, download, deep-scan, recover, delete, and upload
+history files. For five-minute files the preview starts at the first day of the
+file month and searches forward for the first day containing data.
 
 ## Retention
 
@@ -274,6 +467,8 @@ When reading:
 4. Ignore invalid blocks.
 5. Report skipped blocks through API status/warnings.
 
-At startup or before appending, the newest file for a target may be scanned. If
-only the final block is invalid or incomplete, the file can be truncated to the
-last valid block boundary.
+In the current runtime implementation, automatic startup recovery is disabled.
+Recovery runs only when requested through `POST /api/energy/history/recovery`,
+through per-file recovery, or as an append retry after an append failure. If
+only the final block is invalid or incomplete, recovery truncates the file to
+the last valid block boundary.

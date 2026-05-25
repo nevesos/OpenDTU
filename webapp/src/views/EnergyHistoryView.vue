@@ -949,7 +949,11 @@ export default defineComponent({
             const year = Number.isFinite(parsedYear) ? parsedYear : new Date().getFullYear();
             const month = Number.isFinite(parsedMonth) ? parsedMonth : new Date().getMonth() + 1;
             const first = new Date(Date.UTC(year, month - 1, 1));
-            const last = new Date(Date.UTC(year, month, 0));
+            const today = new Date();
+            const last =
+                year === today.getFullYear() && month === today.getMonth() + 1
+                    ? new Date(Date.UTC(year, month - 1, today.getDate()))
+                    : new Date(Date.UTC(year, month, 0));
             return {
                 year,
                 from: this.dayOfYear(first),
