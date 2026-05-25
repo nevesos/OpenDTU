@@ -309,12 +309,8 @@ function statusValue(value?: number): number {
     return value || 0;
 }
 
-const DemoHistoryTargets = [
-    { id: 'inv_999999990101', label: 'Demo WR 1' },
-    { id: 'inv_999999990102', label: 'Demo WR 2' },
-];
-
 const HistoryAutoRefreshIntervalMs = 10000;
+const MaxHistoryFileTargets = 32;
 
 export default defineComponent({
     components: {
@@ -344,6 +340,7 @@ export default defineComponent({
             historyAutoRefreshTimer: undefined as number | undefined,
             liveTotal: null as Total | null,
             inverters: [] as InverterConfig[],
+            historyFiles: [] as EnergyHistoryFile[],
             histories: [] as EnergyHistorySeries[],
             dailyEnergyHistories: [] as EnergyHistorySeries[],
             drillDownMode: false,
@@ -652,6 +649,17 @@ export default defineComponent({
                     intersect: false,
                     mode: 'index',
                 },
+                onClick: (_event: ChartEvent, elements: ActiveElement[]) => {
+                    const element = elements[0];
+                    if (element) {
+                        this.openMonthlyComparisonMonth(element.datasetIndex, element.index);
+                    }
+                },
+                onHover: (event: ChartEvent, elements: ActiveElement[]) => {
+                    if (event.native?.target instanceof HTMLElement) {
+                        event.native.target.style.cursor = elements.length > 0 ? 'pointer' : '';
+                    }
+                },
                 plugins: {
                     legend: {
                         display: true,
@@ -704,7 +712,7 @@ export default defineComponent({
                 this.status = {};
             });
             this.loadLiveTotal();
-            this.loadInverters()
+            Promise.all([this.loadInverters(), this.loadHistoryFileList()])
                 .then(() => this.loadHistory())
                 .finally(() => {
                 this.dataLoading = false;
@@ -743,7 +751,8 @@ export default defineComponent({
                     this.status = data;
                     this.lastHistoryStatusSignature = signature;
                     if (changed) {
-                        this.loadHistory();
+                        this.loadHistoryFileList()
+                            .then(() => this.loadHistory());
                     }
                 })
                 .catch(() => undefined);
@@ -757,7 +766,8 @@ export default defineComponent({
         },
         reloadAfterFileChange() {
             this.loadStatus();
-            this.loadHistory();
+            this.loadHistoryFileList()
+                .then(() => this.loadHistory());
             this.clearMonthlyComparison();
         },
         loadLiveTotal() {
@@ -780,6 +790,16 @@ export default defineComponent({
                 })
                 .catch(() => {
                     this.inverters = [];
+                });
+        },
+        loadHistoryFileList(): Promise<void> {
+            return fetch('/api/energy/history/file/list', { headers: authHeader() })
+                .then((response) => handleResponse(response, this.$emitter, this.$router, true))
+                .then((data: EnergyHistoryFileListResponse) => {
+                    this.historyFiles = data.files || [];
+                })
+                .catch(() => {
+                    this.historyFiles = [];
                 });
         },
         loadHistory(loadDailyEnergy = true) {
@@ -910,8 +930,25 @@ export default defineComponent({
             this.drillDownMode = true;
             this.query.view = 'day';
             this.query.date = this.formatDayOfYear(year, dayOfYear);
-            this.hideMonthlyComparison();
             this.loadHistory(false);
+        },
+        openMonthlyComparisonMonth(datasetIndex: number, dataIndex: number) {
+            const history = this.monthlyComparisonHistories[datasetIndex];
+            const year = Number(history?.label);
+            const month = dataIndex + 1;
+            if (!history || !Number.isFinite(year) || month < 1 || month > 12) {
+                return;
+            }
+
+            const hasMonthData = history.data.some((row) => row.month === month);
+            if (!hasMonthData) {
+                return;
+            }
+
+            this.drillDownMode = true;
+            this.query.view = 'month';
+            this.query.month = `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}`;
+            this.loadHistory();
         },
         loadTargetHistory(target: EnergyHistorySeries): Promise<EnergyHistorySeries> {
             const params = new URLSearchParams();
@@ -1071,33 +1108,51 @@ export default defineComponent({
                 });
             });
 
-            if (this.isDemoHistoryPeriod()) {
-                const existingTargets = new Set(targets.map((target) => target.id));
-                DemoHistoryTargets.forEach((demoTarget) => {
-                    if (existingTargets.has(demoTarget.id)) {
-                        return;
-                    }
+            this.historyFileTargetsForCurrentPeriod().forEach((targetId) => {
+                if (targets.some((target) => target.id === targetId)) {
+                    return;
+                }
 
-                    const color = colors[targets.length % colors.length] || '#0d6efd';
-                    targets.push({
-                        id: demoTarget.id,
-                        label: demoTarget.label,
-                        color,
-                        data: [],
-                    });
+                const color = colors[targets.length % colors.length] || '#0d6efd';
+                targets.push({
+                    id: targetId,
+                    label: this.historyFileTargetLabel(targetId),
+                    color,
+                    data: [],
                 });
-            }
+            });
 
             return targets;
         },
-        isDemoHistoryPeriod(): boolean {
+        historyFileTargetsForCurrentPeriod(): string[] {
+            const targets = new Set<string>();
+            let pattern: RegExp | null = null;
+
             if (this.query.view === 'day') {
-                return this.query.date.startsWith('2099-06-');
+                const date = this.parseDateInput(this.query.date);
+                pattern = new RegExp(`^/energy/5m/(inv_\\d+)_${date.getFullYear()}_${String(date.getMonth() + 1).padStart(2, '0')}\\.eh5$`);
+            } else if (this.query.view === 'month') {
+                const date = this.parseMonthInput(this.query.month);
+                pattern = new RegExp(`^/energy/day/(inv_\\d+)_${date.getFullYear()}\\.ehd$`);
+            } else {
+                pattern = new RegExp(`^/energy/month/(inv_\\d+)_${this.query.year}\\.ehm$`);
             }
-            if (this.query.view === 'month') {
-                return this.query.month === '2099-06';
-            }
-            return this.query.year === 2099;
+
+            this.historyFiles.forEach((file) => {
+                const match = file.path.match(pattern as RegExp);
+                if (match?.[1]) {
+                    targets.add(match[1]);
+                }
+            });
+
+            return Array.from(targets)
+                .sort((a, b) => a.localeCompare(b))
+                .slice(0, MaxHistoryFileTargets);
+        },
+        historyFileTargetLabel(targetId: string): string {
+            const serial = targetId.startsWith('inv_') ? targetId.substring(4) : targetId;
+            const configured = this.inverters.find((inverter) => this.hexSerialToDecimal(inverter.serial) === serial);
+            return configured?.name || serial;
         },
         setView(view: ViewMode) {
             this.drillDownMode = false;

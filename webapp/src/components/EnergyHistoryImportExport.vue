@@ -20,6 +20,7 @@
                     ref="uploadInput"
                     class="form-control"
                     type="file"
+                    multiple
                     @change="onUploadFileSelected"
                 />
             </div>
@@ -30,21 +31,65 @@
                     v-model="uploadPath"
                     class="form-control"
                     type="text"
+                    :disabled="uploadFiles.length > 1"
                     placeholder="/energy/5m/total_2026_05.eh5"
                 />
             </div>
             <div class="col-12 col-lg-2 d-grid">
-                <button type="button" class="btn btn-primary" :disabled="uploading || !uploadFile || !uploadPath" @click="uploadSelectedFile">
+                <button type="button" class="btn btn-primary" :disabled="uploading || uploadFiles.length === 0 || (uploadFiles.length === 1 && !uploadPath)" @click="uploadSelectedFile">
                     <BIconUpload class="me-1" />
-                    {{ uploading ? $t('energyhistory.Uploading') : $t('energyhistory.UploadOverwrite') }}
+                    {{ uploading ? $t('energyhistory.Uploading') : uploadButtonLabel }}
                 </button>
             </div>
+        </div>
+
+        <div class="px-3 pb-3" v-if="uploading || uploadProgress.totalFiles > 0">
+            <div class="d-flex justify-content-between align-items-center small mb-1">
+                <span class="text-muted">
+                    {{ $t('energyhistory.UploadProgress', { current: uploadProgress.currentFile, total: uploadProgress.totalFiles }) }}
+                    <span v-if="uploadProgress.currentName">- {{ uploadProgress.currentName }}</span>
+                </span>
+                <span class="text-muted">{{ uploadProgressPercent }}%</span>
+            </div>
+            <div class="progress" role="progressbar" :aria-valuenow="uploadProgressPercent" aria-valuemin="0" aria-valuemax="100">
+                <div class="progress-bar" :style="{ width: uploadProgressPercent + '%' }"></div>
+            </div>
+            <div class="text-muted small mt-1">
+                {{ formatBytes(uploadProgress.loadedBytes) }} / {{ formatBytes(uploadProgress.totalBytes) }}
+                <span v-if="uploadProgress.retryCount > 0">
+                    - {{ $t('energyhistory.UploadRetry', { count: uploadProgress.retryCount }) }}
+                </span>
+            </div>
+        </div>
+
+        <div class="d-flex flex-wrap gap-2 px-3 pb-3 align-items-center">
+            <button
+                type="button"
+                class="btn btn-outline-primary btn-sm"
+                :disabled="downloadingSelected || selectedBulkFiles.length === 0"
+                @click="downloadSelectedFiles"
+            >
+                <BIconDownload class="me-1" />
+                {{ downloadingSelected ? $t('energyhistory.Downloading') : $t('energyhistory.DownloadSelected', { count: selectedBulkFiles.length }) }}
+            </button>
+            <span class="text-muted small" v-if="selectedBulkFiles.length > 0">
+                {{ $t('energyhistory.FilesSelected', { count: selectedBulkFiles.length }) }}
+            </span>
         </div>
 
         <div class="table-responsive">
             <table class="table table-hover table-condensed align-middle mb-0">
                 <thead>
                     <tr>
+                        <th class="energy-history-file-select text-center">
+                            <input
+                                class="form-check-input"
+                                type="checkbox"
+                                :checked="allFilesSelected"
+                                :disabled="files.length === 0"
+                                @change="toggleAllFiles(($event.target as HTMLInputElement).checked)"
+                            />
+                        </th>
                         <th>{{ $t('energyhistory.FilePath') }}</th>
                         <th class="text-end">{{ $t('energyhistory.FileSize') }}</th>
                         <th class="text-end">
@@ -62,6 +107,14 @@
                         :class="{ 'table-active': selectedFilePath === file.path }"
                         @click="selectFile(file)"
                     >
+                        <td class="energy-history-file-select text-center" @click.stop>
+                            <input
+                                class="form-check-input"
+                                type="checkbox"
+                                :checked="selectedBulkFilePaths.includes(file.path)"
+                                @change="toggleFileSelection(file.path, ($event.target as HTMLInputElement).checked)"
+                            />
+                        </td>
                         <td class="text-break">{{ file.path }}</td>
                         <td class="text-end text-nowrap">{{ formatBytes(file.size) }}</td>
                         <td class="text-end">
@@ -69,7 +122,7 @@
                                 type="button"
                                 class="btn btn-outline-primary btn-sm"
                                 :title="$t('energyhistory.Download')"
-                                @click.stop="downloadFile(file)"
+                                @click.stop="downloadFile(file).catch(() => undefined)"
                             >
                                 <BIconDownload />
                             </button>
@@ -93,10 +146,10 @@
                         </td>
                     </tr>
                     <tr v-if="!loading && files.length === 0">
-                        <td colspan="3" class="text-center text-muted">{{ $t('energyhistory.NoFiles') }}</td>
+                        <td colspan="4" class="text-center text-muted">{{ $t('energyhistory.NoFiles') }}</td>
                     </tr>
                     <tr v-if="loading">
-                        <td colspan="3" class="text-center text-muted">{{ $t('base.Loading') }}</td>
+                        <td colspan="4" class="text-center text-muted">{{ $t('base.Loading') }}</td>
                     </tr>
                 </tbody>
             </table>
@@ -325,6 +378,17 @@ interface AlertState {
     message: string;
 }
 
+interface UploadProgressState {
+    currentFile: number;
+    totalFiles: number;
+    currentName: string;
+    loadedBytes: number;
+    totalBytes: number;
+    completedBytes: number;
+    currentFileLoadedBytes: number;
+    retryCount: number;
+}
+
 export default defineComponent({
     name: 'EnergyHistoryImportExport',
     components: {
@@ -341,7 +405,9 @@ export default defineComponent({
         return {
             loading: false,
             uploading: false,
+            downloadingSelected: false,
             files: [] as EnergyHistoryFile[],
+            selectedBulkFilePaths: [] as string[],
             selectedFilePath: '',
             selectedFile: null as EnergyHistoryFile | null,
             selectedFileRows: [] as EnergyHistoryRow[],
@@ -354,7 +420,18 @@ export default defineComponent({
             selectedFilePreviewDate: '',
             selectedFilePreviewLoading: false,
             uploadFile: null as File | null,
+            uploadFiles: [] as File[],
             uploadPath: '',
+            uploadProgress: {
+                currentFile: 0,
+                totalFiles: 0,
+                currentName: '',
+                loadedBytes: 0,
+                totalBytes: 0,
+                completedBytes: 0,
+                currentFileLoadedBytes: 0,
+                retryCount: 0,
+            } as UploadProgressState,
             alert: {
                 show: false,
                 type: 'info',
@@ -409,6 +486,26 @@ export default defineComponent({
                 year: '-',
             };
         },
+        uploadButtonLabel(): string {
+            if (this.uploadFiles.length > 1) {
+                return String(this.$t('energyhistory.UploadMultipleOverwrite', { count: this.uploadFiles.length }));
+            }
+            return String(this.$t('energyhistory.UploadOverwrite'));
+        },
+        selectedBulkFiles(): EnergyHistoryFile[] {
+            const selected = new Set(this.selectedBulkFilePaths);
+            return this.files.filter((file) => selected.has(file.path));
+        },
+        allFilesSelected(): boolean {
+            return this.files.length > 0 && this.selectedBulkFilePaths.length === this.files.length;
+        },
+        uploadProgressPercent(): number {
+            if (this.uploadProgress.totalBytes <= 0) {
+                return 0;
+            }
+
+            return Math.min(100, Math.round((this.uploadProgress.loadedBytes * 100) / this.uploadProgress.totalBytes));
+        },
         selectedFilePreviewResolution(): EnergyHistoryResolution {
             return this.selectedFileQuery?.resolution || '5m';
         },
@@ -447,6 +544,8 @@ export default defineComponent({
                 .then((response) => handleResponse(response, this.$emitter, this.$router))
                 .then((data: EnergyHistoryFileListResponse) => {
                     this.files = (data.files || []).sort((a, b) => a.path.localeCompare(b.path));
+                    const availablePaths = new Set(this.files.map((file) => file.path));
+                    this.selectedBulkFilePaths = this.selectedBulkFilePaths.filter((path) => availablePaths.has(path));
                     const selectedFile = this.files.find((file) => file.path === this.selectedFilePath);
                     if (selectedFile) {
                         this.selectedFile = selectedFile;
@@ -467,6 +566,19 @@ export default defineComponent({
                 .finally(() => {
                     this.loading = false;
                 });
+        },
+        toggleFileSelection(path: string, selected: boolean) {
+            if (selected) {
+                if (!this.selectedBulkFilePaths.includes(path)) {
+                    this.selectedBulkFilePaths = [...this.selectedBulkFilePaths, path];
+                }
+                return;
+            }
+
+            this.selectedBulkFilePaths = this.selectedBulkFilePaths.filter((selectedPath) => selectedPath !== path);
+        },
+        toggleAllFiles(selected: boolean) {
+            this.selectedBulkFilePaths = selected ? this.files.map((file) => file.path) : [];
         },
         selectFile(file: EnergyHistoryFile) {
             this.selectedFilePath = file.path;
@@ -613,11 +725,11 @@ export default defineComponent({
                 Promise.resolve({ date: this.selectedFilePreviewMinDate, data: { data: [] } as EnergyHistoryResponse }),
             );
         },
-        downloadFile(file: EnergyHistoryFile) {
+        downloadFile(file: EnergyHistoryFile): Promise<void> {
             const params = new URLSearchParams();
             params.set('file', file.path);
 
-            fetch('/api/energy/history/file/download?' + params.toString(), { headers: authHeader() })
+            return fetch('/api/energy/history/file/download?' + params.toString(), { headers: authHeader() })
                 .then((response) => {
                     if (!response.ok) {
                         throw new Error(response.statusText);
@@ -638,6 +750,36 @@ export default defineComponent({
                         type: 'danger',
                         message: String(this.$t('energyhistory.DownloadFailed')),
                     };
+                    throw new Error('download failed');
+                });
+        },
+        downloadSelectedFiles() {
+            const files = this.selectedBulkFiles;
+            if (files.length === 0) {
+                return;
+            }
+
+            this.downloadingSelected = true;
+            files.reduce(
+                (previous, file) => previous.then(() => this.downloadFile(file)),
+                Promise.resolve(),
+            )
+                .then(() => {
+                    this.alert = {
+                        show: true,
+                        type: 'success',
+                        message: String(this.$t('energyhistory.DownloadMultipleSuccess', { count: files.length })),
+                    };
+                })
+                .catch(() => {
+                    this.alert = {
+                        show: true,
+                        type: 'danger',
+                        message: String(this.$t('energyhistory.DownloadMultipleFailed')),
+                    };
+                })
+                .finally(() => {
+                    this.downloadingSelected = false;
                 });
         },
         deleteFile(file: EnergyHistoryFile) {
@@ -749,36 +891,36 @@ export default defineComponent({
         },
         onUploadFileSelected(event: Event) {
             const input = event.target as HTMLInputElement;
-            this.uploadFile = input.files?.[0] || null;
+            this.uploadFiles = Array.from(input.files || []);
+            this.uploadFile = this.uploadFiles[0] || null;
             if (this.uploadFile && !this.uploadPath) {
-                this.uploadPath = `/energy/5m/${this.uploadFile.name}`;
+                this.uploadPath = this.uploadPathForFile(this.uploadFile);
             }
+            this.resetUploadProgress();
         },
         uploadSelectedFile() {
-            if (!this.uploadFile || !this.uploadPath) {
+            if (this.uploadFiles.length === 0) {
                 return;
             }
 
             this.uploading = true;
-            const params = new URLSearchParams();
-            params.set('file', this.uploadPath);
-
-            const formData = new FormData();
-            formData.append('file', this.uploadFile, this.uploadFile.name);
-
-            fetch('/api/energy/history/file/upload?' + params.toString(), {
-                method: 'POST',
-                headers: authHeader(),
-                body: formData,
-            })
-                .then((response) => handleResponse(response, this.$emitter, this.$router))
-                .then((data) => {
+            const files = this.uploadFiles.slice();
+            this.startUploadProgress(files);
+            files.reduce(
+                (previous, file, index) => previous
+                    .then(() => this.uploadOneFileWithRetry(file, files.length === 1 ? this.uploadPath : this.uploadPathForFile(file), index, 0))
+                    .then(() => this.delay(250)),
+                Promise.resolve(),
+            )
+                .then(() => {
                     this.alert = {
                         show: true,
-                        type: data.type || 'success',
-                        message: data.message || String(this.$t('energyhistory.UploadSuccess')),
+                        type: 'success',
+                        message: String(this.$t('energyhistory.UploadMultipleSuccess', { count: files.length })),
                     };
                     this.uploadFile = null;
+                    this.uploadFiles = [];
+                    this.uploadPath = '';
                     const input = this.$refs.uploadInput as HTMLInputElement | undefined;
                     if (input) {
                         input.value = '';
@@ -796,6 +938,134 @@ export default defineComponent({
                 .finally(() => {
                     this.uploading = false;
                 });
+        },
+        uploadOneFileWithRetry(file: File, path: string, index: number, attempt: number): Promise<void> {
+            this.uploadProgress.currentFile = index + 1;
+            this.uploadProgress.currentName = file.name;
+            this.uploadProgress.currentFileLoadedBytes = 0;
+            this.uploadProgress.loadedBytes = this.uploadProgress.completedBytes;
+
+            return this.uploadOneFile(file, path)
+                .then(() => {
+                    this.uploadProgress.completedBytes += file.size;
+                    this.uploadProgress.loadedBytes = this.uploadProgress.completedBytes;
+                })
+                .catch((error: Error & { status?: number }) => {
+                    const temporaryError = error.status === 502 || error.status === 503 || error.status === 504 || error.status === 0;
+                    if (temporaryError && attempt < 2) {
+                        this.uploadProgress.retryCount++;
+                        return this.delay(1200 + attempt * 1800)
+                            .then(() => this.uploadOneFileWithRetry(file, path, index, attempt + 1));
+                    }
+
+                    throw error;
+                });
+        },
+        uploadOneFile(file: File, path: string): Promise<void> {
+            if (!path) {
+                return Promise.reject(new Error('missing path'));
+            }
+
+            const params = new URLSearchParams();
+            params.set('file', path);
+
+            const formData = new FormData();
+            formData.append('file', file, file.name);
+
+            return new Promise((resolve, reject) => {
+                const request = new XMLHttpRequest();
+                request.open('POST', '/api/energy/history/file/upload?' + params.toString());
+                const headers = authHeader();
+                headers.forEach((value, key) => {
+                    request.setRequestHeader(key, value);
+                });
+
+                request.upload.onprogress = (event) => {
+                    if (!event.lengthComputable) {
+                        return;
+                    }
+
+                    this.uploadProgress.currentFileLoadedBytes = event.loaded;
+                    this.uploadProgress.loadedBytes = this.uploadProgress.completedBytes + event.loaded;
+                };
+
+                request.onload = () => {
+                    if (request.status >= 200 && request.status < 300) {
+                        resolve();
+                        return;
+                    }
+
+                    const error = new Error(request.statusText || 'upload failed') as Error & { status?: number };
+                    error.status = request.status;
+                    reject(error);
+                };
+
+                request.onerror = () => {
+                    const error = new Error('upload failed') as Error & { status?: number };
+                    error.status = request.status || 0;
+                    reject(error);
+                };
+
+                request.ontimeout = () => {
+                    const error = new Error('upload timeout') as Error & { status?: number };
+                    error.status = 504;
+                    reject(error);
+                };
+
+                request.timeout = 120000;
+                request.send(formData);
+            });
+        },
+        startUploadProgress(files: File[]) {
+            const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
+            this.uploadProgress = {
+                currentFile: 0,
+                totalFiles: files.length,
+                currentName: '',
+                loadedBytes: 0,
+                totalBytes,
+                completedBytes: 0,
+                currentFileLoadedBytes: 0,
+                retryCount: 0,
+            };
+        },
+        resetUploadProgress() {
+            this.uploadProgress = {
+                currentFile: 0,
+                totalFiles: 0,
+                currentName: '',
+                loadedBytes: 0,
+                totalBytes: 0,
+                completedBytes: 0,
+                currentFileLoadedBytes: 0,
+                retryCount: 0,
+            };
+        },
+        delay(milliseconds: number): Promise<void> {
+            return new Promise((resolve) => {
+                window.setTimeout(resolve, milliseconds);
+            });
+        },
+        uploadPathForFile(file: File): string {
+            const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath || '';
+            const normalizedRelativePath = relativePath.replace(/\\/g, '/');
+            const energyIndex = normalizedRelativePath.indexOf('energy/');
+            if (energyIndex >= 0) {
+                return '/' + normalizedRelativePath.substring(energyIndex);
+            }
+
+            const fileName = file.name.substring(file.name.lastIndexOf('/') + 1);
+            if (fileName.endsWith('.eh5')) {
+                return `/energy/5m/${fileName}`;
+            }
+            if (fileName.endsWith('.ehd')) {
+                return `/energy/day/${fileName}`;
+            }
+            if (fileName.endsWith('.ehm')) {
+                return `/energy/month/${fileName}`;
+            }
+
+            return `/energy/5m/${fileName}`;
         },
         formatBytes(value: number): string {
             if (value < 1024) {
@@ -880,6 +1150,10 @@ export default defineComponent({
 <style scoped>
 .energy-history-file-row {
     cursor: pointer;
+}
+
+.energy-history-file-select {
+    width: 2.75rem;
 }
 
 .energy-history-file-details {

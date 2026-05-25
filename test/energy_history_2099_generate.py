@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate deterministic EnergyHistory upload fixtures for year 2099.
+"""Generate deterministic EnergyHistory upload fixtures for years 2098/2099.
 
 The output files use the on-flash EH01/EHB1 binary format and can be uploaded
 through the Energy History data-management UI.
@@ -17,8 +17,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-YEAR = 2099
-OUT_DIR = Path(__file__).resolve().parent / "energy_history_2099_upload"
+YEARS = [2098, 2099]
+OUT_DIR = Path(__file__).resolve().parent / "energy_history_2098_2099_upload"
 
 FILE_MAGIC = b"EH01"
 BLOCK_MAGIC = b"EHB1"
@@ -93,7 +93,7 @@ def crc32(data: bytes) -> int:
     return zlib.crc32(data) & 0xFFFFFFFF
 
 
-def file_header(file_type: int, target: Target, month: int = 0) -> bytes:
+def file_header(year: int, file_type: int, target: Target, month: int = 0) -> bytes:
     record_size = {
         FILE_TYPE_5M: FIVE_MINUTE_RECORD_SIZE,
         FILE_TYPE_DAY: DAY_RECORD_SIZE,
@@ -107,7 +107,7 @@ def file_header(file_type: int, target: Target, month: int = 0) -> bytes:
     header[5] = VERSION
     header[6] = FILE_HEADER_SIZE
     header[7] = record_size
-    struct.pack_into("<H", header, 8, YEAR)
+    struct.pack_into("<H", header, 8, year)
     header[10] = header_month
     header[11] = target.target_type
     struct.pack_into("<Q", header, 12, target.serial)
@@ -176,14 +176,14 @@ def encode_month(record: MonthRecord) -> bytes:
     )
 
 
-def day_of_year(month: int, day: int) -> int:
-    return sum(calendar.monthrange(YEAR, m)[1] for m in range(1, month)) + day
+def day_of_year(year: int, month: int, day: int) -> int:
+    return sum(calendar.monthrange(year, m)[1] for m in range(1, month)) + day
 
 
-def month_day_from_doy(doy: int) -> tuple[int, int]:
+def month_day_from_doy(year: int, doy: int) -> tuple[int, int]:
     remaining = doy
     for month in range(1, 13):
-        days = calendar.monthrange(YEAR, month)[1]
+        days = calendar.monthrange(year, month)[1]
         if remaining <= days:
             return month, remaining
         remaining -= days
@@ -215,9 +215,9 @@ def target_yield(total_yield: int, target: Target, doy: int) -> int:
     return round(total_yield * target.scale * imbalance)
 
 
-def records_for_day(target: Target, month: int, day: int) -> list[FiveMinuteRecord]:
-    doy = day_of_year(month, day)
-    rng = random.Random(YEAR * 100000 + target.serial + doy)
+def records_for_day(year: int, target: Target, month: int, day: int) -> list[FiveMinuteRecord]:
+    doy = day_of_year(year, month, day)
+    rng = random.Random(year * 100000 + target.serial + doy)
     total = expected_total_yield(doy, rng)
     daily_total = target_yield(total, target, doy)
     start_slot, end_slot = daylight_slots(doy)
@@ -317,11 +317,11 @@ def month_record(month: int, days: list[DayRecord]) -> MonthRecord | None:
     )
 
 
-def write_5m_file(target: Target, month: int, records_by_day: dict[int, list[FiveMinuteRecord]]) -> None:
-    path = OUT_DIR / "energy" / "5m" / f"{target.name}_{YEAR}_{month:02d}.eh5"
+def write_5m_file(year: int, target: Target, month: int, records_by_day: dict[int, list[FiveMinuteRecord]]) -> None:
+    path = OUT_DIR / "energy" / "5m" / f"{target.name}_{year}_{month:02d}.eh5"
     path.parent.mkdir(parents=True, exist_ok=True)
-    data = bytearray(file_header(FILE_TYPE_5M, target, month))
-    for day in range(1, calendar.monthrange(YEAR, month)[1] + 1):
+    data = bytearray(file_header(year, FILE_TYPE_5M, target, month))
+    for day in range(1, calendar.monthrange(year, month)[1] + 1):
         for record in records_by_day.get(day, []):
             payload = encode_5m(record)
             block_index = (day - 1) * SLOTS_PER_DAY + record.slot
@@ -337,10 +337,10 @@ def write_5m_file(target: Target, month: int, records_by_day: dict[int, list[Fiv
     path.write_bytes(bytes(data))
 
 
-def write_day_file(target: Target, day_records: list[DayRecord]) -> None:
-    path = OUT_DIR / "energy" / "day" / f"{target.name}_{YEAR}.ehd"
+def write_day_file(year: int, target: Target, day_records: list[DayRecord]) -> None:
+    path = OUT_DIR / "energy" / "day" / f"{target.name}_{year}.ehd"
     path.parent.mkdir(parents=True, exist_ok=True)
-    data = bytearray(file_header(FILE_TYPE_DAY, target))
+    data = bytearray(file_header(year, FILE_TYPE_DAY, target))
     for record in day_records:
         data += block_with_count(record.day_of_year, record.day_of_year, encode_day(record), 1)
         if target.name == "total" and record.day_of_year == 190:
@@ -357,10 +357,10 @@ def write_day_file(target: Target, day_records: list[DayRecord]) -> None:
     path.write_bytes(bytes(data))
 
 
-def write_month_file(target: Target, month_records: list[MonthRecord]) -> None:
-    path = OUT_DIR / "energy" / "month" / f"{target.name}_{YEAR}.ehm"
+def write_month_file(year: int, target: Target, month_records: list[MonthRecord]) -> None:
+    path = OUT_DIR / "energy" / "month" / f"{target.name}_{year}.ehm"
     path.parent.mkdir(parents=True, exist_ok=True)
-    data = bytearray(file_header(FILE_TYPE_MONTH, target))
+    data = bytearray(file_header(year, FILE_TYPE_MONTH, target))
     for record in month_records:
         data += block_with_count(record.month, record.month, encode_month(record), 1)
     path.write_bytes(bytes(data))
@@ -371,7 +371,7 @@ def write_readme() -> None:
     readme.write_text(
         "\n".join(
             [
-                "# Energy History Testdaten 2099",
+                "# Energy History Testdaten 2098/2099",
                 "",
                 "Diese Dateien sind Upload-Fixtures fuer die Energy-History-Oberflaeche.",
                 "Beim Upload muss der Zielpfad dem relativen Pfad unter diesem Ordner entsprechen,",
@@ -385,15 +385,15 @@ def write_readme() -> None:
                 "",
                 "Enthaltene Besonderheiten:",
                 "",
-                "- ganzes Kalenderjahr 2099 mit 5-Minuten-, Tages- und Monatsdateien",
+                "- ganze Kalenderjahre 2098 und 2099 mit 5-Minuten-, Tages- und Monatsdateien",
                 "- saisonale und taegliche Ertragsvariation",
-                "- 2099-01-14: kompletter Datenausfall",
-                "- 2099-03-04: fehlende Mittags-Samples",
-                "- 2099-04-17: WR 2 zeitweise nicht erreichbar",
-                "- 2099-06-21: geschaetzte Samples und ein korrigierter Duplicate-Slot",
-                "- 2099-07-09: Day-Reset-Flag und korrigierter Tagesdatensatz",
-                "- 2099-09 total 5m: absichtlich unvollstaendiger finaler Block fuer Recovery-Tests",
-                "- 2099-10-15: einzelne fehlende Samples",
+                "- YYYY-01-14: kompletter Datenausfall",
+                "- YYYY-03-04: fehlende Mittags-Samples",
+                "- YYYY-04-17: WR 2 zeitweise nicht erreichbar",
+                "- YYYY-06-21: geschaetzte Samples und ein korrigierter Duplicate-Slot",
+                "- YYYY-07-09: Day-Reset-Flag und korrigierter Tagesdatensatz",
+                "- YYYY-09 total 5m: absichtlich unvollstaendiger finaler Block fuer Recovery-Tests",
+                "- YYYY-10-15: einzelne fehlende Samples",
                 "",
             ]
         ),
@@ -405,28 +405,29 @@ def main() -> None:
     if OUT_DIR.exists():
         shutil.rmtree(OUT_DIR)
 
-    for target in TARGETS:
-        all_day_records: list[DayRecord] = []
-        month_records: list[MonthRecord] = []
+    for year in YEARS:
+        for target in TARGETS:
+            all_day_records: list[DayRecord] = []
+            month_records: list[MonthRecord] = []
 
-        for month in range(1, 13):
-            records_by_day: dict[int, list[FiveMinuteRecord]] = {}
-            day_records_for_month: list[DayRecord] = []
-            for day in range(1, calendar.monthrange(YEAR, month)[1] + 1):
-                records = records_for_day(target, month, day)
-                records_by_day[day] = records
-                record = day_record(day_of_year(month, day), records)
-                if record is not None:
-                    all_day_records.append(record)
-                    day_records_for_month.append(record)
+            for month in range(1, 13):
+                records_by_day: dict[int, list[FiveMinuteRecord]] = {}
+                day_records_for_month: list[DayRecord] = []
+                for day in range(1, calendar.monthrange(year, month)[1] + 1):
+                    records = records_for_day(year, target, month, day)
+                    records_by_day[day] = records
+                    record = day_record(day_of_year(year, month, day), records)
+                    if record is not None:
+                        all_day_records.append(record)
+                        day_records_for_month.append(record)
 
-            write_5m_file(target, month, records_by_day)
-            monthly = month_record(month, day_records_for_month)
-            if monthly is not None:
-                month_records.append(monthly)
+                write_5m_file(year, target, month, records_by_day)
+                monthly = month_record(month, day_records_for_month)
+                if monthly is not None:
+                    month_records.append(monthly)
 
-        write_day_file(target, all_day_records)
-        write_month_file(target, month_records)
+            write_day_file(year, target, all_day_records)
+            write_month_file(year, target, month_records)
 
     write_readme()
     print(f"Wrote {len(list(OUT_DIR.rglob('*.*')))} files to {OUT_DIR}")
