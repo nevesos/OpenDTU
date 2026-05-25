@@ -762,6 +762,8 @@
         "CumulativeEnergyKwh": "Energie kumuliert kWh",
         "DailyEnergyWh": "Tagesenergie Wh",
         "DailyEnergyKwh": "Tagesenergie kWh",
+        "MonthlyEnergyKwh": "Monatsenergie kWh",
+        "LoadMonthlyComparison": "Monatsvergleich laden",
         "Flags": "Flags",
         "MaxPowerW": "Max. Leistung W",
         "AvgPowerW": "Ø Leistung W",

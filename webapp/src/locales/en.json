@@ -763,6 +763,8 @@
         "CumulativeEnergyKwh": "Cumulative energy kWh",
         "DailyEnergyWh": "Daily energy Wh",
         "DailyEnergyKwh": "Daily energy kWh",
+        "MonthlyEnergyKwh": "Monthly energy kWh",
+        "LoadMonthlyComparison": "Load monthly comparison",
         "Flags": "Flags",
         "MaxPowerW": "Max power W",
         "AvgPowerW": "Avg. power W",
