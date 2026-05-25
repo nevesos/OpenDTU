@@ -10,7 +10,6 @@ from __future__ import annotations
 import calendar
 import math
 import random
-import shutil
 import struct
 import zlib
 from dataclasses import dataclass
@@ -402,9 +401,6 @@ def write_readme() -> None:
 
 
 def main() -> None:
-    if OUT_DIR.exists():
-        shutil.rmtree(OUT_DIR)
-
     for year in YEARS:
         for target in TARGETS:
             all_day_records: list[DayRecord] = []
