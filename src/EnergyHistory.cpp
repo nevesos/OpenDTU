@@ -1960,10 +1960,26 @@ bool EnergyHistoryClass::queryDay(const TargetType targetType, const uint64_t se
     return true;
 }
 
+// EnergyHistory.cpp
+// Watchdog-freundliche Lösung für fehlende Monatswerte.
+//
+// Ersetze die bestehende Funktion EnergyHistoryClass::queryMonth(...) vollständig durch diese Version.
+// EnergyHistory.h muss dafür nicht geändert werden.
+//
+// Verhalten:
+// - Vorhandene Monatsrecords werden sofort zurückgegeben.
+// - Fehlende Monatsrecords werden aus Tagesdaten rekonstruiert.
+// - queryDay() darf dabei fehlende Tagesdaten aus 5-Minuten-Daten rekonstruieren und persistieren.
+// - Pro Aufruf wird höchstens EIN fehlender Monat rekonstruiert, damit async_tcp/loopTask nicht
+//   zu lange blockiert und der ESP32-Task-Watchdog nicht auslöst.
+// - Die UI bekommt dadurch sofort alle schon vorhandenen Monatswerte. Fehlende Monate füllen sich
+//   über wiederholte Abfragen nach und nach, werden dann aber dauerhaft in LittleFS persistiert.
+
 bool EnergyHistoryClass::queryMonth(const TargetType targetType, const uint64_t serial, const uint16_t year, const uint8_t fromMonth, const uint8_t toMonth, MonthRecord* records, const uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result)
 {
     result = ScanResult();
     recordCount = 0;
+
     if (records == nullptr
             || recordCapacity == 0
             || fromMonth < 1
@@ -1972,13 +1988,25 @@ bool EnergyHistoryClass::queryMonth(const TargetType targetType, const uint64_t 
         return false;
     }
 
-    FileHeader header;
-    if (!makeFileHeader(FileType::Month, targetType, serial, year, 0, header)) {
+    // Wichtig für ESP32 + AsyncWebServer/loopTask:
+    // Ein kompletter Jahres-Rebuild kann mehrere LittleFS-Dateien lesen und schreiben.
+    // Deshalb nur eine kleine Arbeitseinheit pro Abfrage nachholen.
+    static constexpr uint8_t MaxMonthRebuildsPerQuery = 1;
+
+    auto cooperativeYield = []() {
+        // Gibt anderen Tasks, insbesondere async_tcp und WiFi, Zeit.
+        // Keine harte Garantie gegen jede Blockade, aber verhindert lange CPU-Monopole
+        // zwischen den einzelnen Rekonstruktionsschritten.
+        delay(1);
+    };
+
+    FileHeader monthHeader;
+    if (!makeFileHeader(FileType::Month, targetType, serial, year, 0, monthHeader)) {
         return false;
     }
 
-    const String path = makeMonthPath(targetType, serial, year);
-    if (path.isEmpty()) {
+    const String monthPath = makeMonthPath(targetType, serial, year);
+    if (monthPath.isEmpty()) {
         return false;
     }
 
@@ -1988,10 +2016,12 @@ bool EnergyHistoryClass::queryMonth(const TargetType targetType, const uint64_t 
     }
 
     uint16_t allRecordCount = 0;
-    if (!readMonthFile(path.c_str(), header, allRecords.get(), 12, allRecordCount, result)
-            && LittleFS.exists(path)) {
+    if (!readMonthFile(monthPath.c_str(), monthHeader, allRecords.get(), 12, allRecordCount, result)
+            && LittleFS.exists(monthPath)) {
         return false;
     }
+
+    cooperativeYield();
 
     bool monthPresent[12] = {};
     for (uint16_t i = 0; i < allRecordCount; i++) {
@@ -2000,35 +2030,83 @@ bool EnergyHistoryClass::queryMonth(const TargetType targetType, const uint64_t 
         }
     }
 
-    FileHeader dayHeader;
-    const String dayPath = makeDayPath(targetType, serial, year);
-    std::unique_ptr<DayRecord[]> dayRecords(new (std::nothrow) DayRecord[366]);
-    uint16_t dayRecordCount = 0;
-    ScanResult dayScan;
-    if (dayRecords
-            && !dayPath.isEmpty()
-            && makeFileHeader(FileType::Day, targetType, serial, year, 0, dayHeader)
-            && readDayFile(dayPath.c_str(), dayHeader, dayRecords.get(), 366, dayRecordCount, dayScan)) {
-        MonthRecord derivedRecords[12];
-        uint16_t derivedRecordCount = 0;
-        for (uint8_t monthValue = fromMonth; monthValue <= toMonth; monthValue++) {
-            if (monthPresent[monthValue - 1]) {
-                continue;
-            }
+    uint8_t rebuildCount = 0;
+    MonthRecord derivedRecords[MaxMonthRebuildsPerQuery];
+    uint16_t derivedRecordCount = 0;
 
-            MonthRecord monthRecord;
-            if (buildMonthRecordFromDayRecords(year, monthValue, dayRecords.get(), dayRecordCount, monthRecord)
-                    && derivedRecordCount < sizeof(derivedRecords) / sizeof(derivedRecords[0])) {
-                derivedRecords[derivedRecordCount] = monthRecord;
-                derivedRecordCount++;
-                upsertMonthRecord(allRecords.get(), 12, allRecordCount, monthRecord);
-                monthPresent[monthValue - 1] = true;
-            }
+    for (uint8_t monthValue = fromMonth;
+            monthValue <= toMonth && rebuildCount < MaxMonthRebuildsPerQuery;
+            monthValue++) {
+        if (monthPresent[monthValue - 1]) {
+            continue;
         }
 
-        if (derivedRecordCount > 0) {
-            writeMonthRecordsBatched(targetType, serial, year, derivedRecords, derivedRecordCount);
+        const uint16_t fromDayOfYear = firstDayOfYearForMonth(year, monthValue);
+        const uint8_t monthDays = daysInMonth(year, monthValue);
+        if (fromDayOfYear == 0 || monthDays == 0) {
+            continue;
         }
+
+        const uint16_t toDayOfYear = static_cast<uint16_t>(fromDayOfYear + monthDays - 1);
+
+        std::unique_ptr<DayRecord[]> dayRecords(new (std::nothrow) DayRecord[31]);
+        if (!dayRecords) {
+            break;
+        }
+
+        uint16_t dayRecordCount = 0;
+        ScanResult dayScan;
+
+        // queryDay() ist hier absichtlich nur auf EINEN Monat begrenzt.
+        // Falls Tagesrecords fehlen, baut queryDay() diese aus der 5-Minuten-Datei dieses Monats auf
+        // und persistiert sie über writeDayRecordsBatched().
+        if (!queryDay(
+                    targetType,
+                    serial,
+                    year,
+                    fromDayOfYear,
+                    toDayOfYear,
+                    dayRecords.get(),
+                    31,
+                    dayRecordCount,
+                    dayScan)) {
+            cooperativeYield();
+            continue;
+        }
+
+        result.filesScanned += dayScan.filesScanned;
+        result.validBlocks += dayScan.validBlocks;
+        result.skippedBlocks += dayScan.skippedBlocks;
+        result.validRecords += dayScan.validRecords;
+        result.skippedRecords += dayScan.skippedRecords;
+        result.invalidFinalBlock = result.invalidFinalBlock || dayScan.invalidFinalBlock;
+        result.canTruncateFinalBlock = result.canTruncateFinalBlock || dayScan.canTruncateFinalBlock;
+
+        cooperativeYield();
+
+        MonthRecord monthRecord;
+        if (!buildMonthRecordFromDayRecords(year, monthValue, dayRecords.get(), dayRecordCount, monthRecord)) {
+            continue;
+        }
+
+        if (!upsertMonthRecord(allRecords.get(), 12, allRecordCount, monthRecord)) {
+            result.skippedRecords++;
+            continue;
+        }
+
+        monthPresent[monthValue - 1] = true;
+        derivedRecords[derivedRecordCount] = monthRecord;
+        derivedRecordCount++;
+        rebuildCount++;
+    }
+
+    if (derivedRecordCount > 0) {
+        // Absichtlich nicht fatal: Auch wenn LittleFS im Moment nicht schreiben kann,
+        // soll die Abfrage den rekonstruierten Wert liefern. Beim nächsten Aufruf wird erneut versucht.
+        if (!writeMonthRecordsBatched(targetType, serial, year, derivedRecords, derivedRecordCount)) {
+            result.skippedRecords += derivedRecordCount;
+        }
+        cooperativeYield();
     }
 
     for (uint8_t monthValue = fromMonth; monthValue <= toMonth; monthValue++) {
