@@ -152,7 +152,7 @@
                         </button>
                     </div>
                 </div>
-                <div class="energy-history-chart mt-3">
+                <div v-if="monthlyComparisonExpanded" class="energy-history-chart mt-3">
                     <ChartComponent
                         v-if="monthlyComparisonRequested && !monthlyComparisonLoading && monthlyComparisonHasData"
                         type="bar"
@@ -163,7 +163,7 @@
                     <div v-else-if="monthlyComparisonLoading" class="text-center text-muted py-4">{{ $t('base.Loading') }}</div>
                     <div v-else-if="monthlyComparisonRequested" class="text-center text-muted py-4">{{ $t('energyhistory.NoData') }}</div>
                 </div>
-                <div class="energy-history-chart mt-4">
+                <div v-if="monthlyComparisonExpanded" class="energy-history-chart mt-4">
                     <ChartComponent
                         v-if="monthlyComparisonRequested && !monthlyComparisonLoading && yearlyComparisonHasData"
                         type="bar"
@@ -340,6 +340,7 @@ export default defineComponent({
             dailyEnergyLoading: false,
             dailyEnergyLoadId: 0,
             monthlyComparisonRequested: false,
+            monthlyComparisonExpanded: false,
             monthlyComparisonLoading: false,
             monthlyComparisonLoadId: 0,
             monthlyComparisonHistories: [] as EnergyHistorySeries[],
@@ -1058,6 +1059,7 @@ export default defineComponent({
             const loadId = ++this.monthlyComparisonLoadId;
             const colors = ['#198754', '#0d6efd', '#dc3545', '#fd7e14', '#6f42c1'];
             this.monthlyComparisonRequested = true;
+            this.monthlyComparisonExpanded = true;
             this.monthlyComparisonLoading = true;
             this.monthlyComparisonHistories = [];
 
@@ -1144,6 +1146,7 @@ export default defineComponent({
         clearMonthlyComparison() {
             this.monthlyComparisonLoadId++;
             this.monthlyComparisonRequested = false;
+            this.monthlyComparisonExpanded = false;
             this.monthlyComparisonLoading = false;
             this.monthlyComparisonHistories = [];
             this.monthlyComparisonCache = {};
@@ -1151,6 +1154,7 @@ export default defineComponent({
         hideMonthlyComparison() {
             this.monthlyComparisonLoadId++;
             this.monthlyComparisonRequested = false;
+            this.monthlyComparisonExpanded = false;
             this.monthlyComparisonLoading = false;
             this.monthlyComparisonHistories = [];
         },
