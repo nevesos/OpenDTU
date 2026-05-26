@@ -9,6 +9,7 @@ public:
     void init(AsyncWebServer& server, Scheduler& scheduler);
 
 private:
+    void onRevision(AsyncWebServerRequest* request);
     void onStatus(AsyncWebServerRequest* request);
     void onRecoveryPost(AsyncWebServerRequest* request);
     void onHistory(AsyncWebServerRequest* request);

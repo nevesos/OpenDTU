@@ -134,12 +134,21 @@ public:
         uint32_t lastFinishedMillis = 0;
     };
 
+    struct Revision {
+        uint32_t dataRevision = 0;
+        uint32_t fileRevision = 0;
+        uint32_t lastChangeMillis = 0;
+    };
+
     struct FileInfo {
         String path;
         size_t size = 0;
     };
 
     bool getStatus(Status& status);
+    void getRevision(Revision& revision);
+    void markDataChanged();
+    void markFilesChanged();
     bool requestRecovery();
     void getRecoveryStatus(RecoveryStatus& status);
     bool isManagedFilePath(const String& path, String& normalizedPath);
@@ -193,6 +202,7 @@ private:
     bool appendMonthBlock(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, const EnergyHistoryFormat::MonthRecord* records, uint16_t recordCount, uint16_t blockIndex);
     bool recoverFinalBlock(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, ScanResult& result);
     bool truncateFile(const char* path, size_t size);
+    void markHistoryChanged(bool dataChanged, bool filesChanged);
     void recoverExistingEnergyFiles();
     void recoverEnergyDirectory(const char* directoryPath);
     bool listFilesInDirectory(const char* directoryPath, const std::function<void(const FileInfo&)>& visitor);
@@ -206,9 +216,13 @@ private:
     bool runManualPersistenceProbe(ManualProbeResult& result);
     bool writeDemoData();
     bool persistCurrentFiveMinuteSlot();
+    bool writeDayRecordsBatched(EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, const EnergyHistoryFormat::DayRecord* records, uint16_t recordCount);
+    bool buildDayRecordsFromFiveMinuteMonth(EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, uint8_t month, const uint16_t* requestedDaysOfYear, uint16_t requestedDayCount, EnergyHistoryFormat::DayRecord* records, uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result);
     bool finalizeCompletedPeriod(EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, uint8_t month, uint8_t day, bool finalizeMonth);
     bool buildDayRecordFromFiveMinute(EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, uint8_t month, uint8_t day, EnergyHistoryFormat::DayRecord& record);
     bool buildMonthRecordFromDay(EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, uint8_t month, EnergyHistoryFormat::MonthRecord& record);
+    bool queuePendingFinalization(EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, uint8_t month, uint8_t day, bool finalizeMonth);
+    void processPendingFinalizations(uint8_t maxAttempts);
 
     Task _loopTask;
     Task _startupTask;
@@ -223,6 +237,23 @@ private:
     uint8_t _lastFiveMinuteMonth = 0;
     uint8_t _lastFiveMinuteDay = 0;
     uint16_t _lastFiveMinuteSlot = 0;
+    uint32_t _dataRevision = 1;
+    uint32_t _fileRevision = 1;
+    uint32_t _lastChangeMillis = 0;
+
+    struct PendingFinalization {
+        bool active = false;
+        EnergyHistoryFormat::TargetType targetType = EnergyHistoryFormat::TargetType::Total;
+        uint64_t serial = 0;
+        uint16_t year = 0;
+        uint8_t month = 0;
+        uint8_t day = 0;
+        bool finalizeMonth = false;
+        uint8_t attempts = 0;
+    };
+
+    static constexpr uint8_t MaxPendingFinalizations = 12;
+    PendingFinalization _pendingFinalizations[MaxPendingFinalizations];
 };
 
 extern EnergyHistoryClass EnergyHistory;

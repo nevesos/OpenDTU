@@ -152,9 +152,33 @@ void WebApiEnergyHistoryClass::init(AsyncWebServer& server, Scheduler& scheduler
 {
     using std::placeholders::_1;
 
+    server.on("/api/energy/history/revision", HTTP_GET, static_cast<ArRequestHandlerFunction>(std::bind(&WebApiEnergyHistoryClass::onRevision, this, _1)));
     server.on("/api/energy/history/status", HTTP_GET, static_cast<ArRequestHandlerFunction>(std::bind(&WebApiEnergyHistoryClass::onStatus, this, _1)));
     server.on("/api/energy/history/recovery", HTTP_POST, static_cast<ArRequestHandlerFunction>(std::bind(&WebApiEnergyHistoryClass::onRecoveryPost, this, _1)));
     server.on("/api/energy/history", HTTP_GET, static_cast<ArRequestHandlerFunction>(std::bind(&WebApiEnergyHistoryClass::onHistory, this, _1)));
+}
+
+void WebApiEnergyHistoryClass::onRevision(AsyncWebServerRequest* request)
+{
+    if (!WebApi.checkCredentialsReadonly(request)) {
+        return;
+    }
+
+    EnergyHistoryClass::Revision revision;
+    EnergyHistory.getRevision(revision);
+
+    EnergyHistoryClass::RecoveryStatus recoveryStatus;
+    EnergyHistory.getRecoveryStatus(recoveryStatus);
+
+    AsyncJsonResponse* response = new AsyncJsonResponse();
+    auto& root = response->getRoot();
+    root["data_revision"] = revision.dataRevision;
+    root["file_revision"] = revision.fileRevision;
+    root["last_change_ms"] = revision.lastChangeMillis;
+    root["recovery_pending"] = recoveryStatus.pending;
+    root["recovery_running"] = recoveryStatus.running;
+
+    WebApi.sendJsonResponse(request, response, __FUNCTION__, __LINE__);
 }
 
 void WebApiEnergyHistoryClass::onStatus(AsyncWebServerRequest* request)

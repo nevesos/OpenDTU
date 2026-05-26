@@ -104,6 +104,8 @@ bool EnergyHistoryClass::persistCurrentFiveMinuteSlot()
         return false;
     }
 
+    processPendingFinalizations(2);
+
     if (_lastFiveMinuteSlotValid
             && _lastFiveMinuteYear == year
             && _lastFiveMinuteMonth == month
@@ -119,7 +121,9 @@ bool EnergyHistoryClass::persistCurrentFiveMinuteSlot()
     const bool monthChanged = dateChanged
             && (_lastFiveMinuteYear != year || _lastFiveMinuteMonth != month);
     if (dateChanged) {
-        finalizeCompletedPeriod(TargetType::Total, 0, _lastFiveMinuteYear, _lastFiveMinuteMonth, _lastFiveMinuteDay, monthChanged);
+        if (!finalizeCompletedPeriod(TargetType::Total, 0, _lastFiveMinuteYear, _lastFiveMinuteMonth, _lastFiveMinuteDay, monthChanged)) {
+            queuePendingFinalization(TargetType::Total, 0, _lastFiveMinuteYear, _lastFiveMinuteMonth, _lastFiveMinuteDay, monthChanged);
+        }
 
         for (uint8_t i = 0; i < Hoymiles.getNumInverters(); i++) {
             auto inv = Hoymiles.getInverterByPos(i);
@@ -132,7 +136,9 @@ bool EnergyHistoryClass::persistCurrentFiveMinuteSlot()
                 continue;
             }
 
-            finalizeCompletedPeriod(TargetType::Inverter, inv->serial(), _lastFiveMinuteYear, _lastFiveMinuteMonth, _lastFiveMinuteDay, monthChanged);
+            if (!finalizeCompletedPeriod(TargetType::Inverter, inv->serial(), _lastFiveMinuteYear, _lastFiveMinuteMonth, _lastFiveMinuteDay, monthChanged)) {
+                queuePendingFinalization(TargetType::Inverter, inv->serial(), _lastFiveMinuteYear, _lastFiveMinuteMonth, _lastFiveMinuteDay, monthChanged);
+            }
         }
     }
 
@@ -186,4 +192,66 @@ bool EnergyHistoryClass::persistCurrentFiveMinuteSlot()
     }
 
     return ok;
+}
+
+bool EnergyHistoryClass::queuePendingFinalization(const TargetType targetType, const uint64_t serial, const uint16_t year, const uint8_t month, const uint8_t day, const bool finalizeMonth)
+{
+    if (month < 1 || month > 12 || day < 1 || day > 31) {
+        return false;
+    }
+
+    PendingFinalization* freeSlot = nullptr;
+    for (uint8_t i = 0; i < MaxPendingFinalizations; i++) {
+        PendingFinalization& pending = _pendingFinalizations[i];
+        if (!pending.active) {
+            if (freeSlot == nullptr) {
+                freeSlot = &pending;
+            }
+            continue;
+        }
+
+        if (pending.targetType == targetType
+                && pending.serial == serial
+                && pending.year == year
+                && pending.month == month
+                && pending.day == day) {
+            pending.finalizeMonth = pending.finalizeMonth || finalizeMonth;
+            return true;
+        }
+    }
+
+    if (freeSlot == nullptr) {
+        return false;
+    }
+
+    freeSlot->active = true;
+    freeSlot->targetType = targetType;
+    freeSlot->serial = serial;
+    freeSlot->year = year;
+    freeSlot->month = month;
+    freeSlot->day = day;
+    freeSlot->finalizeMonth = finalizeMonth;
+    freeSlot->attempts = 0;
+    return true;
+}
+
+void EnergyHistoryClass::processPendingFinalizations(const uint8_t maxAttempts)
+{
+    uint8_t attempts = 0;
+    for (uint8_t i = 0; i < MaxPendingFinalizations && attempts < maxAttempts; i++) {
+        PendingFinalization& pending = _pendingFinalizations[i];
+        if (!pending.active) {
+            continue;
+        }
+
+        attempts++;
+        if (finalizeCompletedPeriod(pending.targetType, pending.serial, pending.year, pending.month, pending.day, pending.finalizeMonth)) {
+            pending = PendingFinalization();
+            continue;
+        }
+
+        if (pending.attempts < UINT8_MAX) {
+            pending.attempts++;
+        }
+    }
 }

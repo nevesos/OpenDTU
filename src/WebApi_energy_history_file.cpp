@@ -192,6 +192,7 @@ void WebApiEnergyHistoryFileClass::onFileDelete(AsyncWebServerRequest* request)
         return;
     }
 
+    EnergyHistory.markFilesChanged();
     sendJsonMessage(request, 200, "success", "Energy history file deleted", WebApiError::GenericSuccess);
 }
 
@@ -247,5 +248,6 @@ void WebApiEnergyHistoryFileClass::onFileUploadFinish(AsyncWebServerRequest* req
         return;
     }
 
+    EnergyHistory.markFilesChanged();
     sendJsonMessage(request, 200, "success", "Energy history file uploaded", WebApiError::GenericSuccess);
 }

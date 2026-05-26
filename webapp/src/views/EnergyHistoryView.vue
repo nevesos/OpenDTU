@@ -232,6 +232,14 @@ interface EnergyHistoryStatus {
     littlefs_used?: number;
 }
 
+interface EnergyHistoryRevision {
+    data_revision?: number;
+    file_revision?: number;
+    last_change_ms?: number;
+    recovery_pending?: boolean;
+    recovery_running?: boolean;
+}
+
 interface EnergyHistoryRow {
     day?: number;
     slot?: number;
@@ -346,7 +354,8 @@ export default defineComponent({
             monthlyComparisonHistories: [] as EnergyHistorySeries[],
             monthlyComparisonCache: {} as Record<string, EnergyHistoryRow[]>,
             status: {} as EnergyHistoryStatus,
-            lastHistoryStatusSignature: '',
+            lastHistoryDataRevision: 0,
+            lastHistoryFileRevision: 0,
             historyAutoRefreshTimer: undefined as number | undefined,
             liveTotal: null as Total | null,
             inverters: [] as InverterConfig[],
@@ -789,7 +798,16 @@ export default defineComponent({
                 .then((response) => handleResponse(response, this.$emitter, this.$router))
                 .then((data) => {
                     this.status = data;
-                    this.lastHistoryStatusSignature = this.historyStatusSignature(data);
+                    return this.loadRevision();
+                });
+        },
+        loadRevision() {
+            return fetch('/api/energy/history/revision', { headers: authHeader() })
+                .then((response) => handleResponse(response, this.$emitter, this.$router, true))
+                .then((data: EnergyHistoryRevision) => {
+                    this.lastHistoryDataRevision = data.data_revision || 0;
+                    this.lastHistoryFileRevision = data.file_revision || 0;
+                    return data;
                 });
         },
         startHistoryAutoRefresh() {
@@ -809,26 +827,23 @@ export default defineComponent({
                 return;
             }
 
-            return fetch('/api/energy/history/status', { headers: authHeader() })
+            return fetch('/api/energy/history/revision', { headers: authHeader() })
                 .then((response) => handleResponse(response, this.$emitter, this.$router, true))
-                .then((data: EnergyHistoryStatus) => {
-                    const signature = this.historyStatusSignature(data);
-                    const changed = this.lastHistoryStatusSignature !== '' && signature !== this.lastHistoryStatusSignature;
-                    this.status = data;
-                    this.lastHistoryStatusSignature = signature;
-                    if (changed) {
+                .then((data: EnergyHistoryRevision) => {
+                    const dataRevision = data.data_revision || 0;
+                    const fileRevision = data.file_revision || 0;
+                    const dataChanged = this.lastHistoryDataRevision !== 0 && dataRevision !== this.lastHistoryDataRevision;
+                    const filesChanged = this.lastHistoryFileRevision !== 0 && fileRevision !== this.lastHistoryFileRevision;
+                    this.lastHistoryDataRevision = dataRevision;
+                    this.lastHistoryFileRevision = fileRevision;
+                    if (filesChanged) {
                         this.loadHistoryFileList()
                             .then(() => this.loadHistory());
+                    } else if (dataChanged) {
+                        this.loadHistory();
                     }
                 })
                 .catch(() => undefined);
-        },
-        historyStatusSignature(status: EnergyHistoryStatus): string {
-            return [
-                status.files_scanned || 0,
-                status.bytes_scanned || 0,
-                status.littlefs_used || 0,
-            ].join(':');
         },
         reloadAfterFileChange() {
             this.loadStatus();

@@ -529,7 +529,7 @@ bool findOldestRetentionCandidate(String& path)
     return found;
 }
 
-bool ensureRetentionFreeSpaceForNewFile()
+bool ensureRetentionFreeSpaceForNewFile(bool& removedFiles)
 {
     while (littleFsFreeBytes() < RetentionMinimumFreeBytes) {
         String oldestPath;
@@ -540,6 +540,7 @@ bool ensureRetentionFreeSpaceForNewFile()
         if (!LittleFS.remove(oldestPath)) {
             return false;
         }
+        removedFiles = true;
     }
 
     return true;
@@ -874,6 +875,36 @@ void EnergyHistoryClass::getRecoveryStatus(RecoveryStatus& status)
     status.lastFinishedMillis = _recoveryLastFinishedMillis;
 }
 
+void EnergyHistoryClass::getRevision(Revision& revision)
+{
+    revision.dataRevision = _dataRevision;
+    revision.fileRevision = _fileRevision;
+    revision.lastChangeMillis = _lastChangeMillis;
+}
+
+void EnergyHistoryClass::markHistoryChanged(const bool dataChanged, const bool filesChanged)
+{
+    if (dataChanged) {
+        _dataRevision++;
+    }
+    if (filesChanged) {
+        _fileRevision++;
+    }
+    if (dataChanged || filesChanged) {
+        _lastChangeMillis = millis();
+    }
+}
+
+void EnergyHistoryClass::markDataChanged()
+{
+    markHistoryChanged(true, false);
+}
+
+void EnergyHistoryClass::markFilesChanged()
+{
+    markHistoryChanged(true, true);
+}
+
 void EnergyHistoryClass::recoveryLoop()
 {
     _recoveryPending = false;
@@ -1095,8 +1126,12 @@ bool EnergyHistoryClass::appendBlock(const char* path, const FileHeader& expecte
         return false;
     }
 
-    if (isNewHistoryFile(path) && !ensureRetentionFreeSpaceForNewFile()) {
-        return false;
+    const bool newHistoryFile = isNewHistoryFile(path);
+    bool retentionRemovedFiles = false;
+    if (newHistoryFile) {
+        if (!ensureRetentionFreeSpaceForNewFile(retentionRemovedFiles)) {
+            return false;
+        }
     }
 
     if (!ensureFileHeader(path, expectedHeader)) {
@@ -1132,6 +1167,7 @@ bool EnergyHistoryClass::appendBlock(const char* path, const FileHeader& expecte
     };
 
     if (appendEncodedBlock()) {
+        markHistoryChanged(true, newHistoryFile || retentionRemovedFiles);
         return true;
     }
 
@@ -1140,7 +1176,12 @@ bool EnergyHistoryClass::appendBlock(const char* path, const FileHeader& expecte
         return false;
     }
 
-    return appendEncodedBlock();
+    if (!appendEncodedBlock()) {
+        return false;
+    }
+
+    markHistoryChanged(true, true);
+    return true;
 }
 
 bool EnergyHistoryClass::appendFiveMinuteBlock(const char* path, const FileHeader& expectedHeader, const FiveMinuteRecord* records, const uint16_t recordCount, const uint16_t blockIndex)
@@ -1257,6 +1298,7 @@ bool EnergyHistoryClass::truncateFile(const char* path, const size_t size)
         return false;
     }
 
+    markHistoryChanged(true, true);
     return true;
 }
 
@@ -1811,6 +1853,9 @@ bool EnergyHistoryClass::queryDay(const TargetType targetType, const uint64_t se
         return false;
     }
 
+    uint16_t missingDaysByMonth[12][31] = {};
+    uint16_t missingDayCountByMonth[12] = {};
+
     for (uint16_t dayOfYearValue = fromDayOfYear; dayOfYearValue <= toDayOfYear; dayOfYearValue++) {
         const DayRecord* existingRecord = nullptr;
         for (uint16_t i = 0; i < allRecordCount; i++) {
@@ -1833,12 +1878,71 @@ bool EnergyHistoryClass::queryDay(const TargetType targetType, const uint64_t se
 
         uint8_t month = 0;
         uint8_t day = 0;
-        DayRecord derivedRecord;
-        if (monthDayFromDayOfYear(year, dayOfYearValue, month, day)
-                && buildDayRecordFromFiveMinute(targetType, serial, year, month, day, derivedRecord)) {
-            records[recordCount] = derivedRecord;
+        if (monthDayFromDayOfYear(year, dayOfYearValue, month, day) && month >= 1 && month <= 12) {
+            const uint8_t monthIndex = static_cast<uint8_t>(month - 1);
+            if (missingDayCountByMonth[monthIndex] < 31) {
+                missingDaysByMonth[monthIndex][missingDayCountByMonth[monthIndex]] = dayOfYearValue;
+                missingDayCountByMonth[monthIndex]++;
+            }
+        }
+    }
+
+    for (uint8_t monthIndex = 0; monthIndex < 12; monthIndex++) {
+        const uint16_t missingDayCount = missingDayCountByMonth[monthIndex];
+        if (missingDayCount == 0) {
+            continue;
+        }
+
+        DayRecord derivedRecords[31];
+        uint16_t derivedRecordCount = 0;
+        ScanResult monthScan;
+        if (!buildDayRecordsFromFiveMinuteMonth(
+                    targetType,
+                    serial,
+                    year,
+                    static_cast<uint8_t>(monthIndex + 1),
+                    missingDaysByMonth[monthIndex],
+                    missingDayCount,
+                    derivedRecords,
+                    sizeof(derivedRecords) / sizeof(derivedRecords[0]),
+                    derivedRecordCount,
+                    monthScan)) {
+            continue;
+        }
+
+        result.filesScanned += monthScan.filesScanned;
+        result.validBlocks += monthScan.validBlocks;
+        result.skippedBlocks += monthScan.skippedBlocks;
+        result.validRecords += monthScan.validRecords;
+        result.skippedRecords += monthScan.skippedRecords;
+
+        if (derivedRecordCount > 0) {
+            writeDayRecordsBatched(targetType, serial, year, derivedRecords, derivedRecordCount);
+        }
+
+        for (uint16_t i = 0; i < derivedRecordCount; i++) {
+            if (derivedRecords[i].dayOfYear < fromDayOfYear || derivedRecords[i].dayOfYear > toDayOfYear) {
+                continue;
+            }
+
+            if (recordCount >= recordCapacity) {
+                result.skippedRecords++;
+                continue;
+            }
+
+            records[recordCount] = derivedRecords[i];
             recordCount++;
         }
+    }
+
+    for (uint16_t i = 1; i < recordCount; i++) {
+        DayRecord value = records[i];
+        uint16_t j = i;
+        while (j > 0 && records[j - 1].dayOfYear > value.dayOfYear) {
+            records[j] = records[j - 1];
+            j--;
+        }
+        records[j] = value;
     }
 
     return true;
@@ -1887,6 +1991,265 @@ bool EnergyHistoryClass::queryMonth(const TargetType targetType, const uint64_t 
         }
 
         records[recordCount] = allRecords[i];
+        recordCount++;
+    }
+
+    return true;
+}
+
+bool EnergyHistoryClass::writeDayRecordsBatched(const TargetType targetType, const uint64_t serial, const uint16_t year, const DayRecord* records, const uint16_t recordCount)
+{
+    if (records == nullptr || recordCount == 0) {
+        return false;
+    }
+
+    bool ok = true;
+    for (uint16_t offset = 0; offset < recordCount; offset += MaxRecordsPerAppendBlock) {
+        const uint16_t remaining = recordCount - offset;
+        const uint16_t chunkCount = remaining > MaxRecordsPerAppendBlock ? MaxRecordsPerAppendBlock : remaining;
+        ok = writeDay(targetType, serial, year, records + offset, chunkCount, records[offset].dayOfYear) && ok;
+    }
+
+    return ok;
+}
+
+bool EnergyHistoryClass::buildDayRecordsFromFiveMinuteMonth(const TargetType targetType, const uint64_t serial, const uint16_t year, const uint8_t month, const uint16_t* requestedDaysOfYear, const uint16_t requestedDayCount, DayRecord* records, const uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result)
+{
+    result = ScanResult();
+    recordCount = 0;
+    if (requestedDaysOfYear == nullptr
+            || requestedDayCount == 0
+            || records == nullptr
+            || recordCapacity == 0
+            || month < 1
+            || month > 12) {
+        return false;
+    }
+
+    const uint16_t firstDay = firstDayOfYearForMonth(year, month);
+    const uint8_t monthDays = daysInMonth(year, month);
+    if (firstDay == 0 || monthDays == 0) {
+        return false;
+    }
+
+    int8_t compactIndexByDay[31];
+    std::memset(compactIndexByDay, -1, sizeof(compactIndexByDay));
+    uint8_t dayIndexByCompact[31] = {};
+    uint8_t compactDayCount = 0;
+    for (uint16_t i = 0; i < requestedDayCount; i++) {
+        const uint16_t dayOfYearValue = requestedDaysOfYear[i];
+        if (dayOfYearValue < firstDay || dayOfYearValue >= firstDay + monthDays) {
+            continue;
+        }
+
+        const uint8_t dayIndex = static_cast<uint8_t>(dayOfYearValue - firstDay);
+        if (compactIndexByDay[dayIndex] >= 0) {
+            continue;
+        }
+
+        compactIndexByDay[dayIndex] = static_cast<int8_t>(compactDayCount);
+        dayIndexByCompact[compactDayCount] = dayIndex;
+        compactDayCount++;
+    }
+
+    if (compactDayCount == 0) {
+        return true;
+    }
+
+    FileHeader header;
+    if (!makeFileHeader(FileType::FiveMinute, targetType, serial, year, month, header)) {
+        return false;
+    }
+
+    const String path = makeFiveMinutePath(targetType, serial, year, month);
+    if (path.isEmpty()) {
+        return false;
+    }
+
+    File file = LittleFS.open(path.c_str(), "r", false);
+    if (!file || file.size() < FileHeaderSize || !readValidatedFileHeader(file, header)) {
+        return false;
+    }
+
+    const size_t slotCount = static_cast<size_t>(compactDayCount) * FiveMinuteSlotsPerDay;
+    std::unique_ptr<uint32_t[]> yieldBySlot(new (std::nothrow) uint32_t[slotCount]());
+    std::unique_ptr<uint8_t[]> flagsBySlot(new (std::nothrow) uint8_t[slotCount]());
+    if (!yieldBySlot || !flagsBySlot) {
+        return false;
+    }
+
+    result.filesScanned++;
+    result.fileSize = file.size();
+    result.lastValidOffset = FileHeaderSize;
+
+    while (file.available() > 0) {
+        const size_t remaining = result.fileSize - file.position();
+        if (remaining < BlockHeaderSize) {
+            result.skippedBlocks++;
+            result.invalidFinalBlock = true;
+            result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
+            break;
+        }
+
+        uint8_t encodedBlockHeader[BlockHeaderSize];
+        if (!readFull(file, encodedBlockHeader, sizeof(encodedBlockHeader))) {
+            result.skippedBlocks++;
+            result.invalidFinalBlock = true;
+            result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
+            break;
+        }
+
+        BlockHeader blockHeader;
+        if (!decodeBlockHeader(encodedBlockHeader, sizeof(encodedBlockHeader), blockHeader)
+                || blockHeader.recordCount == 0
+                || blockHeader.payloadSize == 0
+                || blockHeader.payloadSize != blockHeader.recordCount * FiveMinuteRecordSize
+                || result.fileSize - file.position() < blockHeader.payloadSize) {
+            result.skippedBlocks++;
+            result.invalidFinalBlock = true;
+            result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
+            break;
+        }
+
+        const size_t payloadStart = file.position();
+        uint32_t crc = 0xffffffff;
+        uint16_t bytesRemaining = blockHeader.payloadSize;
+        uint8_t buffer[FileReadBufferSize];
+        while (bytesRemaining > 0) {
+            const size_t chunkSize = bytesRemaining < sizeof(buffer) ? bytesRemaining : sizeof(buffer);
+            if (!readFull(file, buffer, chunkSize)) {
+                result.skippedBlocks++;
+                result.invalidFinalBlock = true;
+                result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
+                return true;
+            }
+
+            crc = updateCrc32(crc, buffer, chunkSize);
+            bytesRemaining -= chunkSize;
+        }
+
+        if (blockHeader.crc32Payload != finalizeCrc32(crc)) {
+            result.skippedBlocks++;
+            if (file.position() == result.fileSize) {
+                result.invalidFinalBlock = true;
+                result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
+            }
+            continue;
+        }
+
+        if (!file.seek(payloadStart)) {
+            result.skippedBlocks++;
+            result.invalidFinalBlock = true;
+            result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
+            return true;
+        }
+
+        for (uint16_t i = 0; i < blockHeader.recordCount; i++) {
+            uint8_t encodedRecord[FiveMinuteRecordSize];
+            if (!readFull(file, encodedRecord, sizeof(encodedRecord))) {
+                result.skippedBlocks++;
+                result.invalidFinalBlock = true;
+                result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
+                return true;
+            }
+
+            FiveMinuteRecord sample;
+            if (!decodeFiveMinuteRecord(encodedRecord, sizeof(encodedRecord), sample)) {
+                result.skippedRecords++;
+                continue;
+            }
+
+            result.validRecords++;
+            if ((sample.flags & RecordFlagValid) == 0 || sample.day < 1 || sample.day > monthDays) {
+                continue;
+            }
+
+            const int8_t compactIndex = compactIndexByDay[sample.day - 1];
+            if (compactIndex < 0) {
+                continue;
+            }
+
+            const size_t slotIndex = static_cast<size_t>(compactIndex) * FiveMinuteSlotsPerDay + sample.slot;
+            yieldBySlot[slotIndex] = sample.yieldDayWh;
+            flagsBySlot[slotIndex] = sample.flags;
+        }
+
+        result.validBlocks++;
+        result.lastValidOffset = file.position();
+    }
+
+    for (uint8_t compactIndex = 0; compactIndex < compactDayCount; compactIndex++) {
+        if (recordCount >= recordCapacity) {
+            result.skippedRecords++;
+            break;
+        }
+
+        const uint8_t dayIndex = dayIndexByCompact[compactIndex];
+        const uint16_t dayOfYearValue = static_cast<uint16_t>(firstDay + dayIndex);
+        uint32_t maxYieldWh = 0;
+        uint32_t maxPowerW = 0;
+        uint32_t runtimeMin = 0;
+        uint16_t sampleCount = 0;
+        uint16_t previousSlot = 0;
+        uint32_t previousYieldWh = 0;
+        bool previousValid = false;
+        DayRecord record;
+        std::memset(&record, 0, sizeof(record));
+        record.dayOfYear = dayOfYearValue;
+
+        for (uint16_t slot = 0; slot < FiveMinuteSlotsPerDay; slot++) {
+            const size_t slotIndex = static_cast<size_t>(compactIndex) * FiveMinuteSlotsPerDay + slot;
+            const uint8_t flags = flagsBySlot[slotIndex];
+            if ((flags & RecordFlagValid) == 0) {
+                continue;
+            }
+
+            const uint32_t yieldWh = yieldBySlot[slotIndex];
+            sampleCount++;
+            if ((flags & RecordFlagReachable) != 0) {
+                record.flags |= RecordFlagReachable;
+            }
+            if ((flags & RecordFlagProducing) != 0) {
+                record.flags |= RecordFlagProducing;
+                runtimeMin += FiveMinuteIntervalSec / 60;
+            }
+            if ((flags & RecordFlagEstimated) != 0) {
+                record.flags |= RecordFlagEstimated;
+            }
+
+            if (yieldWh > maxYieldWh) {
+                maxYieldWh = yieldWh;
+            }
+
+            if (previousValid) {
+                if (yieldWh < previousYieldWh) {
+                    record.flags |= RecordFlagDayResetDetected;
+                } else if (slot > previousSlot && yieldWh > previousYieldWh) {
+                    const uint32_t deltaWh = yieldWh - previousYieldWh;
+                    const uint32_t deltaSec = static_cast<uint32_t>(slot - previousSlot) * FiveMinuteIntervalSec;
+                    const uint32_t powerW = (deltaWh * 3600U + deltaSec / 2U) / deltaSec;
+                    if (powerW > maxPowerW) {
+                        maxPowerW = powerW;
+                    }
+                }
+            }
+
+            previousSlot = slot;
+            previousYieldWh = yieldWh;
+            previousValid = true;
+        }
+
+        if (sampleCount == 0) {
+            continue;
+        }
+
+        record.yieldWh = maxYieldWh;
+        record.maxPowerW = saturateUint16(maxPowerW);
+        record.runtimeMin = saturateUint16(runtimeMin);
+        record.sampleCount = sampleCount;
+        record.avgPowerW = averagePowerW(record.yieldWh, record.runtimeMin);
+        record.flags |= RecordFlagValid;
+        records[recordCount] = record;
         recordCount++;
     }
 
