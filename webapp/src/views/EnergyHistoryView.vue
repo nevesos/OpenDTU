@@ -1,7 +1,6 @@
 <template>
     <BasePage
         :title="$t('energyhistory.EnergyHistory')"
-        :isLoading="dataLoading"
         :isWideScreen="true"
         :show-reload="true"
         @reload="reloadAll"
@@ -125,6 +124,7 @@
                     :options="chartOptions"
                     :height="320"
                 />
+                <div v-else-if="historyLoading" class="text-center text-muted py-4">{{ $t('base.Loading') }}</div>
                 <div v-else class="text-center text-muted py-4">{{ $t('energyhistory.NoData') }}</div>
             </div>
             <div class="energy-history-chart mt-4">
@@ -342,7 +342,6 @@ export default defineComponent({
     },
     data() {
         return {
-            dataLoading: true,
             historyLoading: false,
             historyLoadId: 0,
             dailyEnergyLoading: false,
@@ -782,16 +781,15 @@ export default defineComponent({
     },
     methods: {
         reloadAll() {
-            this.dataLoading = true;
-            this.loadStatus().catch(() => {
-                this.status = {};
-            });
-            this.loadLiveTotal();
-            Promise.all([this.loadInverters(), this.loadHistoryFileList()])
+            this.loadInverters()
                 .then(() => this.loadHistory())
                 .finally(() => {
-                this.dataLoading = false;
-            });
+                    this.loadStatus().catch(() => {
+                        this.status = {};
+                    });
+                    this.loadLiveTotal();
+                    this.loadHistoryFileListAfterInitialHistory();
+                });
         },
         loadStatus() {
             return fetch('/api/energy/history/status', { headers: authHeader() })
@@ -883,6 +881,16 @@ export default defineComponent({
                     this.historyFiles = [];
                 });
         },
+        loadHistoryFileListAfterInitialHistory() {
+            const initialTargetIds = new Set(this.historyTargets().map((target) => target.id));
+            this.loadHistoryFileList()
+                .then(() => {
+                    const hasAdditionalTargets = this.historyTargets().some((target) => !initialTargetIds.has(target.id));
+                    if (hasAdditionalTargets) {
+                        this.loadHistory(false);
+                    }
+                });
+        },
         loadHistory(loadDailyEnergy = true) {
             const loadId = ++this.historyLoadId;
             this.historyLoading = true;
@@ -920,7 +928,7 @@ export default defineComponent({
                     }
                 });
 
-            return (requests[0] || Promise.resolve())
+            return Promise.all(requests)
                 .then(() => undefined)
                 .finally(() => {
                     if (loadId === this.historyLoadId) {
@@ -1121,18 +1129,18 @@ export default defineComponent({
                 .then((data: EnergyHistoryFileListResponse) => {
                     const years = new Set<number>();
                     (data.files || []).forEach((file) => {
-                        const match = file.path.match(/^\/energy\/month\/total_(\d{4})\.ehm$/);
+                        const match = file.path.match(/^\/energy\/(?:month\/total_(\d{4})\.ehm|day\/total_(\d{4})\.ehd|5m\/total_(\d{4})_\d{2}\.eh5)$/);
                         if (!match) {
                             return;
                         }
 
-                        const year = Number(match[1]);
+                        const year = Number(match[1] || match[2] || match[3]);
                         if (Number.isFinite(year)) {
                             years.add(year);
                         }
                     });
 
-                    return Array.from(years).sort((a, b) => b - a);
+                    return Array.from(years).sort((a, b) => a - b);
                 })
                 .catch(() => []);
         },

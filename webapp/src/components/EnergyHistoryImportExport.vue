@@ -1,7 +1,7 @@
 <template>
     <CardElement :text="$t('energyhistory.DataManagement')" textVariant="text-bg-primary" add-space table>
         <div class="d-flex justify-content-end px-3 pt-3">
-            <button type="button" class="btn btn-outline-secondary btn-sm" @click="dataManagementExpanded = !dataManagementExpanded">
+            <button type="button" class="btn btn-outline-secondary btn-sm" @click="toggleDataManagement">
                 <BIconChevronUp v-if="dataManagementExpanded" class="me-1" />
                 <BIconChevronDown v-else class="me-1" />
                 {{ dataManagementExpanded ? $t('energyhistory.HideDataManagement') : $t('energyhistory.ShowDataManagement') }}
@@ -426,6 +426,7 @@ export default defineComponent({
             uploading: false,
             downloadingSelected: false,
             dataManagementExpanded: false,
+            dataManagementFilesLoaded: false,
             files: [] as EnergyHistoryFile[],
             selectedBulkFilePaths: [] as string[],
             selectedFilePath: '',
@@ -460,9 +461,6 @@ export default defineComponent({
                 message: '',
             } as AlertState,
         };
-    },
-    created() {
-        this.loadFiles();
     },
     computed: {
         selectedFileDetails(): EnergyHistoryFileDetails {
@@ -560,11 +558,18 @@ export default defineComponent({
         },
     },
     methods: {
+        toggleDataManagement() {
+            this.dataManagementExpanded = !this.dataManagementExpanded;
+            if (this.dataManagementExpanded && !this.dataManagementFilesLoaded && !this.loading) {
+                this.loadFiles();
+            }
+        },
         loadFiles(): Promise<void> {
             this.loading = true;
             return fetch('/api/energy/history/file/list', { headers: authHeader() })
                 .then((response) => handleResponse(response, this.$emitter, this.$router))
                 .then((data: EnergyHistoryFileListResponse) => {
+                    this.dataManagementFilesLoaded = true;
                     this.files = (data.files || []).sort((a, b) => a.path.localeCompare(b.path));
                     const availablePaths = new Set(this.files.map((file) => file.path));
                     this.selectedBulkFilePaths = this.selectedBulkFilePaths.filter((path) => availablePaths.has(path));
