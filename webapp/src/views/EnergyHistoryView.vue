@@ -116,7 +116,27 @@
         </CardElement>
 
         <CardElement :text="$t('energyhistory.Chart')" textVariant="text-bg-primary" add-space>
-            <div class="energy-history-chart">
+            <div v-if="resolution === '5m'" class="d-flex justify-content-end mb-2">
+                <div class="btn-group btn-group-sm" role="group" :aria-label="$t('energyhistory.TimeAxis')">
+                    <button
+                        type="button"
+                        class="btn"
+                        :class="fixedDayAxis ? 'btn-outline-secondary' : 'btn-primary'"
+                        @click="fixedDayAxis = false"
+                    >
+                        {{ $t('energyhistory.DataRange') }}
+                    </button>
+                    <button
+                        type="button"
+                        class="btn"
+                        :class="fixedDayAxis ? 'btn-primary' : 'btn-outline-secondary'"
+                        @click="fixedDayAxis = true"
+                    >
+                        {{ $t('energyhistory.FullDayAxis') }}
+                    </button>
+                </div>
+            </div>
+            <div class="energy-history-chart energy-history-chart-main">
                 <ChartComponent
                     v-if="chartHasData"
                     type="bar"
@@ -127,16 +147,41 @@
                 <div v-else-if="historyLoading" class="text-center text-muted py-4">{{ $t('base.Loading') }}</div>
                 <div v-else class="text-center text-muted py-4">{{ $t('energyhistory.NoData') }}</div>
             </div>
-            <div class="energy-history-chart mt-4">
-                <ChartComponent
-                    v-if="!dailyEnergyLoading && dailyEnergyHistories.some((history) => history.data.length > 0)"
-                    type="bar"
-                    :data="dailyEnergyChartData"
-                    :options="dailyEnergyChartOptions"
-                    :height="260"
-                />
-                <div v-else-if="dailyEnergyLoading" class="text-center text-muted py-4">{{ $t('base.Loading') }}</div>
-                <div v-else class="text-center text-muted py-4">{{ $t('energyhistory.NoData') }}</div>
+            <div class="mt-4">
+                <div
+                    v-if="dailyEnergyHistories.some((history) => history.data.length > 0)"
+                    class="d-flex justify-content-end mb-2"
+                >
+                    <div class="btn-group btn-group-sm" role="group" :aria-label="$t('energyhistory.DailyEnergyDisplay')">
+                        <button
+                            type="button"
+                            class="btn"
+                            :class="dailyEnergyStacked ? 'btn-primary' : 'btn-outline-secondary'"
+                            @click="dailyEnergyStacked = true"
+                        >
+                            {{ $t('energyhistory.Stacked') }}
+                        </button>
+                        <button
+                            type="button"
+                            class="btn"
+                            :class="dailyEnergyStacked ? 'btn-outline-secondary' : 'btn-primary'"
+                            @click="dailyEnergyStacked = false"
+                        >
+                            {{ $t('energyhistory.Separate') }}
+                        </button>
+                    </div>
+                </div>
+                <div class="energy-history-chart energy-history-chart-daily">
+                    <ChartComponent
+                        v-if="!dailyEnergyLoading && dailyEnergyHistories.some((history) => history.data.length > 0)"
+                        type="bar"
+                        :data="dailyEnergyChartData"
+                        :options="dailyEnergyChartOptions"
+                        :height="260"
+                    />
+                    <div v-else-if="dailyEnergyLoading" class="text-center text-muted py-4">{{ $t('base.Loading') }}</div>
+                    <div v-else class="text-center text-muted py-4">{{ $t('energyhistory.NoData') }}</div>
+                </div>
             </div>
             <div class="mt-4">
                 <div class="row g-3 align-items-end">
@@ -152,7 +197,7 @@
                         </button>
                     </div>
                 </div>
-                <div v-if="monthlyComparisonExpanded" class="energy-history-chart mt-3">
+                <div v-if="monthlyComparisonExpanded" class="energy-history-chart energy-history-chart-daily mt-3">
                     <ChartComponent
                         v-if="monthlyComparisonRequested && !monthlyComparisonLoading && monthlyComparisonHasData"
                         type="bar"
@@ -163,7 +208,7 @@
                     <div v-else-if="monthlyComparisonLoading" class="text-center text-muted py-4">{{ $t('base.Loading') }}</div>
                     <div v-else-if="monthlyComparisonRequested" class="text-center text-muted py-4">{{ $t('energyhistory.NoData') }}</div>
                 </div>
-                <div v-if="monthlyComparisonExpanded" class="energy-history-chart mt-4">
+                <div v-if="monthlyComparisonExpanded" class="energy-history-chart energy-history-chart-yearly mt-4">
                     <ChartComponent
                         v-if="monthlyComparisonRequested && !monthlyComparisonLoading && yearlyComparisonHasData"
                         type="bar"
@@ -362,6 +407,8 @@ export default defineComponent({
             histories: [] as EnergyHistorySeries[],
             dailyEnergyHistories: [] as EnergyHistorySeries[],
             drillDownMode: false,
+            fixedDayAxis: false,
+            dailyEnergyStacked: true,
             query: {
                 view: 'day' as ViewMode,
                 date: localDateInputValue(),
@@ -575,7 +622,7 @@ export default defineComponent({
                         borderColor: history.color,
                         backgroundColor: this.withAlpha(history.color, 0.72),
                         borderWidth: 1,
-                        stack: 'daily-energy',
+                        stack: this.dailyEnergyStacked ? 'daily-energy' : undefined,
                     })),
             };
         },
@@ -628,7 +675,7 @@ export default defineComponent({
                 },
                 scales: {
                     x: {
-                        stacked: true,
+                        stacked: this.dailyEnergyStacked,
                         ticks: {
                             maxRotation: 0,
                             autoSkip: true,
@@ -639,7 +686,7 @@ export default defineComponent({
                         },
                     },
                     y: {
-                        stacked: true,
+                        stacked: this.dailyEnergyStacked,
                         beginAtZero: true,
                         title: {
                             display: true,
@@ -1412,6 +1459,10 @@ export default defineComponent({
             });
         },
         fiveMinuteChartSlots(histories: EnergyHistorySeries[]): number[] {
+            if (this.fixedDayAxis) {
+                return Array.from({ length: 288 }, (_value, index) => index);
+            }
+
             const presentSlots = histories
                 .flatMap((history) => history.data)
                 .map((row) => row.slot)
@@ -1538,7 +1589,19 @@ export default defineComponent({
 <style scoped>
 .energy-history-chart {
     position: relative;
-    min-height: 320px;
+    width: 100%;
+}
+
+.energy-history-chart-main {
+    height: 320px;
+}
+
+.energy-history-chart-daily {
+    height: 260px;
+}
+
+.energy-history-chart-yearly {
+    height: 220px;
 }
 
 .energy-history-period-nav {
