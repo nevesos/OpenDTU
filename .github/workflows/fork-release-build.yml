@@ -3,6 +3,11 @@ name: Fork Release Build
 on:
   workflow_dispatch:
     inputs:
+      source_ref:
+        description: "Branch, tag, or SHA to build."
+        required: true
+        default: "feature/persistent-energy-history"
+        type: string
       release_tag:
         description: "Release tag. Leave empty to use fork-build-<run number>."
         required: false
@@ -30,6 +35,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.source_ref }}
 
       - name: Cache pip
         uses: actions/cache@v5
@@ -127,8 +134,10 @@ jobs:
         with:
           tag_name: ${{ steps.release.outputs.tag }}
           name: ${{ steps.release.outputs.tag }}
-          target_commitish: ${{ github.sha }}
+          target_commitish: ${{ inputs.source_ref }}
           body: |
+            Source ref: ${{ inputs.source_ref }}
+
             Firmware build for:
             - generic_esp32s3_usb_16mb_energy_history_psram
             - generic_esp32s3_usb
