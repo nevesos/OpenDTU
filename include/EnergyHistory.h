@@ -217,7 +217,9 @@ private:
     bool writeDemoData();
     bool persistCurrentFiveMinuteSlot();
     bool writeDayRecordsBatched(EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, const EnergyHistoryFormat::DayRecord* records, uint16_t recordCount);
+    bool writeMonthRecordsBatched(EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, const EnergyHistoryFormat::MonthRecord* records, uint16_t recordCount);
     bool buildDayRecordsFromFiveMinuteMonth(EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, uint8_t month, const uint16_t* requestedDaysOfYear, uint16_t requestedDayCount, EnergyHistoryFormat::DayRecord* records, uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result);
+    bool buildMonthRecordFromDayRecords(uint16_t year, uint8_t month, const EnergyHistoryFormat::DayRecord* days, uint16_t dayRecordCount, EnergyHistoryFormat::MonthRecord& record);
     bool finalizeCompletedPeriod(EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, uint8_t month, uint8_t day, bool finalizeMonth);
     bool buildDayRecordFromFiveMinute(EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, uint8_t month, uint8_t day, EnergyHistoryFormat::DayRecord& record);
     bool buildMonthRecordFromDay(EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, uint8_t month, EnergyHistoryFormat::MonthRecord& record);

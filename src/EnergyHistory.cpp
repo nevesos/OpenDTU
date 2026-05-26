@@ -1760,6 +1760,18 @@ bool EnergyHistoryClass::queryFiveMinuteDay(const TargetType targetType, const u
         }
 
         const size_t payloadStart = file.position();
+        if (blockHeader.startKey != day) {
+            if (!file.seek(payloadStart + blockHeader.payloadSize)) {
+                result.skippedBlocks++;
+                result.invalidFinalBlock = true;
+                result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
+                return true;
+            }
+
+            result.lastValidOffset = file.position();
+            continue;
+        }
+
         uint32_t crc = 0xffffffff;
         uint16_t bytesRemaining = blockHeader.payloadSize;
         uint8_t buffer[FileReadBufferSize];
@@ -1976,22 +1988,62 @@ bool EnergyHistoryClass::queryMonth(const TargetType targetType, const uint64_t 
     }
 
     uint16_t allRecordCount = 0;
-    if (!readMonthFile(path.c_str(), header, allRecords.get(), 12, allRecordCount, result)) {
+    if (!readMonthFile(path.c_str(), header, allRecords.get(), 12, allRecordCount, result)
+            && LittleFS.exists(path)) {
         return false;
     }
 
+    bool monthPresent[12] = {};
     for (uint16_t i = 0; i < allRecordCount; i++) {
-        if (allRecords[i].month < fromMonth || allRecords[i].month > toMonth) {
-            continue;
+        if (allRecords[i].month >= 1 && allRecords[i].month <= 12) {
+            monthPresent[allRecords[i].month - 1] = true;
+        }
+    }
+
+    FileHeader dayHeader;
+    const String dayPath = makeDayPath(targetType, serial, year);
+    std::unique_ptr<DayRecord[]> dayRecords(new (std::nothrow) DayRecord[366]);
+    uint16_t dayRecordCount = 0;
+    ScanResult dayScan;
+    if (dayRecords
+            && !dayPath.isEmpty()
+            && makeFileHeader(FileType::Day, targetType, serial, year, 0, dayHeader)
+            && readDayFile(dayPath.c_str(), dayHeader, dayRecords.get(), 366, dayRecordCount, dayScan)) {
+        MonthRecord derivedRecords[12];
+        uint16_t derivedRecordCount = 0;
+        for (uint8_t monthValue = fromMonth; monthValue <= toMonth; monthValue++) {
+            if (monthPresent[monthValue - 1]) {
+                continue;
+            }
+
+            MonthRecord monthRecord;
+            if (buildMonthRecordFromDayRecords(year, monthValue, dayRecords.get(), dayRecordCount, monthRecord)
+                    && derivedRecordCount < sizeof(derivedRecords) / sizeof(derivedRecords[0])) {
+                derivedRecords[derivedRecordCount] = monthRecord;
+                derivedRecordCount++;
+                upsertMonthRecord(allRecords.get(), 12, allRecordCount, monthRecord);
+                monthPresent[monthValue - 1] = true;
+            }
         }
 
+        if (derivedRecordCount > 0) {
+            writeMonthRecordsBatched(targetType, serial, year, derivedRecords, derivedRecordCount);
+        }
+    }
+
+    for (uint8_t monthValue = fromMonth; monthValue <= toMonth; monthValue++) {
         if (recordCount >= recordCapacity) {
             result.skippedRecords++;
             continue;
         }
 
-        records[recordCount] = allRecords[i];
-        recordCount++;
+        for (uint16_t i = 0; i < allRecordCount; i++) {
+            if (allRecords[i].month == monthValue) {
+                records[recordCount] = allRecords[i];
+                recordCount++;
+                break;
+            }
+        }
     }
 
     return true;
@@ -2008,6 +2060,22 @@ bool EnergyHistoryClass::writeDayRecordsBatched(const TargetType targetType, con
         const uint16_t remaining = recordCount - offset;
         const uint16_t chunkCount = remaining > MaxRecordsPerAppendBlock ? MaxRecordsPerAppendBlock : remaining;
         ok = writeDay(targetType, serial, year, records + offset, chunkCount, records[offset].dayOfYear) && ok;
+    }
+
+    return ok;
+}
+
+bool EnergyHistoryClass::writeMonthRecordsBatched(const TargetType targetType, const uint64_t serial, const uint16_t year, const MonthRecord* records, const uint16_t recordCount)
+{
+    if (records == nullptr || recordCount == 0) {
+        return false;
+    }
+
+    bool ok = true;
+    for (uint16_t offset = 0; offset < recordCount; offset += MaxRecordsPerAppendBlock) {
+        const uint16_t remaining = recordCount - offset;
+        const uint16_t chunkCount = remaining > MaxRecordsPerAppendBlock ? MaxRecordsPerAppendBlock : remaining;
+        ok = writeMonth(targetType, serial, year, records + offset, chunkCount, records[offset].month) && ok;
     }
 
     return ok;
@@ -2112,6 +2180,20 @@ bool EnergyHistoryClass::buildDayRecordsFromFiveMinuteMonth(const TargetType tar
         }
 
         const size_t payloadStart = file.position();
+        if (blockHeader.startKey < 1
+                || blockHeader.startKey > monthDays
+                || compactIndexByDay[blockHeader.startKey - 1] < 0) {
+            if (!file.seek(payloadStart + blockHeader.payloadSize)) {
+                result.skippedBlocks++;
+                result.invalidFinalBlock = true;
+                result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
+                return true;
+            }
+
+            result.lastValidOffset = file.position();
+            continue;
+        }
+
         uint32_t crc = 0xffffffff;
         uint16_t bytesRemaining = blockHeader.payloadSize;
         uint8_t buffer[FileReadBufferSize];
@@ -2410,12 +2492,6 @@ bool EnergyHistoryClass::buildDayRecordFromFiveMinute(const TargetType targetTyp
 
 bool EnergyHistoryClass::buildMonthRecordFromDay(const TargetType targetType, const uint64_t serial, const uint16_t year, const uint8_t month, MonthRecord& record)
 {
-    const uint16_t firstDay = firstDayOfYearForMonth(year, month);
-    const uint8_t monthDays = daysInMonth(year, month);
-    if (firstDay == 0 || monthDays == 0) {
-        return false;
-    }
-
     FileHeader header;
     if (!makeFileHeader(FileType::Day, targetType, serial, year, 0, header)) {
         return false;
@@ -2431,20 +2507,21 @@ bool EnergyHistoryClass::buildMonthRecordFromDay(const TargetType targetType, co
         return false;
     }
 
-    bool daysPresent[31] = {};
     uint16_t recordCount = 0;
     ScanResult scan;
     if (!readDayFile(path.c_str(), header, days.get(), 366, recordCount, scan)) {
         return false;
     }
 
-    for (uint16_t i = 0; i < recordCount; i++) {
-        if (days[i].dayOfYear < firstDay || days[i].dayOfYear >= firstDay + monthDays) {
-            continue;
-        }
+    return buildMonthRecordFromDayRecords(year, month, days.get(), recordCount, record);
+}
 
-        const uint8_t index = static_cast<uint8_t>(days[i].dayOfYear - firstDay);
-        daysPresent[index] = true;
+bool EnergyHistoryClass::buildMonthRecordFromDayRecords(const uint16_t year, const uint8_t month, const DayRecord* days, const uint16_t dayRecordCount, MonthRecord& record)
+{
+    const uint16_t firstDay = firstDayOfYearForMonth(year, month);
+    const uint8_t monthDays = daysInMonth(year, month);
+    if (days == nullptr || firstDay == 0 || monthDays == 0) {
+        return false;
     }
 
     std::memset(&record, 0, sizeof(record));
@@ -2454,8 +2531,10 @@ bool EnergyHistoryClass::buildMonthRecordFromDay(const TargetType targetType, co
     uint16_t maxPowerW = 0;
     uint16_t dayCount = 0;
 
-    for (uint8_t i = 0; i < monthDays; i++) {
-        if (!daysPresent[i] || (days[i].flags & RecordFlagValid) == 0) {
+    for (uint16_t i = 0; i < dayRecordCount; i++) {
+        if (days[i].dayOfYear < firstDay
+                || days[i].dayOfYear >= firstDay + monthDays
+                || (days[i].flags & RecordFlagValid) == 0) {
             continue;
         }
 
