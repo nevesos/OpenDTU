@@ -217,6 +217,44 @@
                         :height="220"
                     />
                 </div>
+                <div
+                    v-if="monthlyComparisonRequested && !monthlyComparisonLoading && monthlyComparisonHasData"
+                    class="energy-history-year-summary-wrap mt-4"
+                >
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover align-middle energy-history-year-summary mb-0">
+                            <thead>
+                                <tr>
+                                    <th>{{ $t('energyhistory.Year') }}</th>
+                                    <th
+                                        v-for="month in monthLabels()"
+                                        :key="month"
+                                        class="text-end"
+                                    >
+                                        {{ month }}
+                                    </th>
+                                    <th class="text-end">{{ $t('energyhistory.Total') }}</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="history in monthlyComparisonHistories" :key="history.id">
+                                    <th scope="row">{{ history.label }}</th>
+                                    <td
+                                        v-for="(value, index) in monthlyComparisonValues(history.data)"
+                                        :key="index"
+                                        class="text-end text-nowrap"
+                                        :class="{ 'energy-history-current-month': index + 1 === currentMonthNumber && Number(history.label) === currentYearNumber }"
+                                    >
+                                        {{ value === null ? '-' : $n(value) }}
+                                    </td>
+                                    <td class="text-end text-nowrap fw-semibold">
+                                        {{ $n(yearlyComparisonValue(history.data)) }}
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
         </CardElement>
 
@@ -454,6 +492,12 @@ export default defineComponent({
             }
             return this.$t('energyhistory.CurrentYear');
         },
+        currentMonthNumber(): number {
+            return new Date().getMonth() + 1;
+        },
+        currentYearNumber(): number {
+            return new Date().getFullYear();
+        },
         showDrillDownBreadcrumb(): boolean {
             return this.drillDownMode && this.query.view !== 'year';
         },
@@ -494,10 +538,10 @@ export default defineComponent({
                     data: this.resolution === '5m'
                         ? this.fiveMinutePowerData(totalHistory, fiveMinuteSlots)
                         : totalHistory.data.map((row) => row[powerKey] || 0),
-                    borderColor: '#212529',
-                    backgroundColor: 'transparent',
+                    borderColor: '#ffc107',
+                    backgroundColor: this.withAlpha('#ffc107', 0.22),
                     borderWidth: 3,
-                    fill: false,
+                    fill: true,
                     spanGaps: false,
                     tension: 0.18,
                     pointRadius: this.resolution === '5m' ? 0 : 2,
@@ -1671,6 +1715,28 @@ export default defineComponent({
     border: 1px solid var(--bs-border-color);
     border-radius: var(--bs-border-radius);
     background: var(--bs-body-bg);
+}
+
+.energy-history-year-summary th,
+.energy-history-year-summary td {
+    white-space: nowrap;
+}
+
+.energy-history-year-summary-wrap {
+    padding: 0.75rem;
+    border: 1px solid var(--bs-border-color);
+    border-radius: var(--bs-border-radius);
+    background: var(--bs-body-bg);
+}
+
+.energy-history-year-summary .energy-history-current-month {
+    background: rgba(255, 193, 7, 0.16);
+}
+
+.energy-history-year-summary th:last-child,
+.energy-history-year-summary td:last-child {
+    border-left: 1px solid var(--bs-border-color);
+    background: var(--bs-tertiary-bg);
 }
 
 @media (min-width: 768px) and (max-width: 1199.98px) {
