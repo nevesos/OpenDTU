@@ -1,5 +1,5 @@
 <template>
-    <CardElement :text="$t('energyhistory.DataManagement')" textVariant="text-bg-primary" add-space table>
+    <CardElement :text="$t('energyhistory.DataManagement')" textVariant="text-bg-primary" class="mt-3" table>
         <div class="d-flex justify-content-end px-3 pt-3">
             <button type="button" class="btn btn-outline-secondary btn-sm" @click="toggleDataManagement">
                 <BIconChevronUp v-if="dataManagementExpanded" class="me-1" />

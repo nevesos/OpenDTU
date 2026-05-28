@@ -5,11 +5,11 @@
         :show-reload="true"
         @reload="reloadAll"
     >
-        <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+        <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
             <InverterTotalInfo v-if="liveTotal" :totalData="liveTotal" class="energy-history-row-totals" />
         </div>
 
-        <CardElement :text="$t('energyhistory.Query')" textVariant="text-bg-primary" add-space>
+        <CardElement :text="$t('energyhistory.Query')" textVariant="text-bg-primary" class="energy-history-section-card">
             <!-- Breadcrumb Navigation -->
             <div class="mb-3" v-if="showDrillDownBreadcrumb">
                 <nav aria-label="breadcrumb">
@@ -115,7 +115,7 @@
             </form>
         </CardElement>
 
-        <CardElement :text="$t('energyhistory.Chart')" textVariant="text-bg-primary" add-space>
+        <CardElement :text="$t('energyhistory.Chart')" textVariant="text-bg-primary" class="energy-history-section-card">
             <div v-if="resolution === '5m'" class="d-flex justify-content-end mb-2">
                 <div class="btn-group btn-group-sm" role="group" :aria-label="$t('energyhistory.TimeAxis')">
                     <button
@@ -173,7 +173,7 @@
                     <BIconChevronRight />
                 </button>
             </div>
-            <div class="mt-4">
+            <div class="mt-3">
                 <div
                     v-if="dailyEnergyHistories.some((history) => history.data.length > 0)"
                     class="d-flex justify-content-end mb-2"
@@ -225,7 +225,7 @@
                     </button>
                 </div>
             </div>
-            <div class="mt-4">
+            <div class="mt-3">
                 <div class="row g-3 align-items-end">
                     <div class="col-12 col-md-auto">
                         <button
@@ -239,7 +239,7 @@
                         </button>
                     </div>
                 </div>
-                <div v-if="monthlyComparisonExpanded" class="energy-history-chart energy-history-chart-daily mt-3">
+                <div v-if="monthlyComparisonExpanded" class="energy-history-chart energy-history-chart-daily mt-2">
                     <ChartComponent
                         v-if="monthlyComparisonRequested && !monthlyComparisonLoading && monthlyComparisonHasData"
                         type="bar"
@@ -250,7 +250,7 @@
                     <div v-else-if="monthlyComparisonLoading" class="text-center text-muted py-4">{{ $t('base.Loading') }}</div>
                     <div v-else-if="monthlyComparisonRequested" class="text-center text-muted py-4">{{ $t('energyhistory.NoData') }}</div>
                 </div>
-                <div v-if="monthlyComparisonExpanded" class="energy-history-chart energy-history-chart-yearly mt-4">
+                <div v-if="monthlyComparisonExpanded" class="energy-history-chart energy-history-chart-yearly mt-3">
                     <ChartComponent
                         v-if="monthlyComparisonRequested && !monthlyComparisonLoading && yearlyComparisonHasData"
                         type="bar"
@@ -261,7 +261,7 @@
                 </div>
                 <div
                     v-if="monthlyComparisonRequested && !monthlyComparisonLoading && monthlyComparisonHasData"
-                    class="energy-history-year-summary-wrap mt-4"
+                    class="energy-history-year-summary-wrap mt-3"
                 >
                     <div class="table-responsive">
                         <table class="table table-sm table-hover align-middle energy-history-year-summary mb-0">
@@ -300,7 +300,7 @@
             </div>
         </CardElement>
 
-        <div class="row row-cols-1 row-cols-sm-2 row-cols-xl-5 g-3 energy-history-status-tiles mt-5">
+        <div class="row row-cols-1 row-cols-sm-2 row-cols-xl-5 g-2 energy-history-status-tiles mt-3">
             <div class="col" v-for="tile in statusTiles" :key="tile.label">
                 <div class="energy-history-status-tile">
                     <div class="text-muted small">{{ tile.label }}</div>
@@ -1815,6 +1815,10 @@ export default defineComponent({
     width: 100%;
 }
 
+.energy-history-section-card {
+    margin-top: 1rem;
+}
+
 .energy-history-chart-nav {
     position: absolute;
     top: 0;
@@ -1920,8 +1924,8 @@ export default defineComponent({
 
 .energy-history-status-tile {
     height: 100%;
-    min-height: 92px;
-    padding: 1rem;
+    min-height: 78px;
+    padding: 0.75rem;
     border: 1px solid var(--bs-border-color);
     border-radius: var(--bs-border-radius);
     background: var(--bs-body-bg);
