@@ -71,24 +71,13 @@ generic_esp32s3_usb_16mb_energy_history_psram
 
 ## Screenshots
 
-Screenshots der neuen Ansichten folgen noch:
+### Moduluebersicht
 
-- Moduluebersicht
-- Energiehistorie
+![Moduluebersicht](docs/module-overview.png)
 
-Empfohlene Ablage, damit GitHub sie direkt in dieser README anzeigen kann:
+### Energiehistorie
 
-```text
-docs/screenshots/module-overview.png
-docs/screenshots/energy-history.png
-```
-
-Danach koennen sie hier eingebunden werden:
-
-```markdown
-![Moduluebersicht](docs/screenshots/module-overview.png)
-![Energiehistorie](docs/screenshots/energy-history.png)
-```
+![Energiehistorie](docs/energy-history.png)
 
 ## Build
 
