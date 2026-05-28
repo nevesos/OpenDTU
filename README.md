@@ -1,46 +1,124 @@
-# OpenDTU
+# OpenDTU Fork mit Energiehistorie und Moduluebersicht
 
-[![OpenDTU Build](https://github.com/tbnobody/OpenDTU/actions/workflows/build.yml/badge.svg)](https://github.com/tbnobody/OpenDTU/actions/workflows/build.yml)
-[![cpplint](https://github.com/tbnobody/OpenDTU/actions/workflows/cpplint.yml/badge.svg)](https://github.com/tbnobody/OpenDTU/actions/workflows/cpplint.yml)
-[![Yarn Linting](https://github.com/tbnobody/OpenDTU/actions/workflows/yarnlint.yml/badge.svg)](https://github.com/tbnobody/OpenDTU/actions/workflows/yarnlint.yml)
-[![Yarn Prettier](https://github.com/tbnobody/OpenDTU/actions/workflows/yarnprettier.yml/badge.svg)](https://github.com/tbnobody/OpenDTU/actions/workflows/yarnprettier.yml)
+Dieser Fork erweitert OpenDTU um zwei groessere Funktionen fuer Anlagen, bei
+denen nicht nur Livewerte, sondern auch Verlauf, Modulstatus und eine
+anschauliche Modulansicht wichtig sind.
 
-## !! IMPORTANT UPGRADE NOTES !!
+Basis ist weiterhin OpenDTU von tbnobody. Die hier beschriebenen Erweiterungen
+sind fork-spezifisch und liegen im Branch `feature/persistent-energy-history`.
 
-If you are upgrading from a version before 15.03.2023 you have to upgrade the partition table of the ESP32. Please follow the [this](docs/UpgradePartition.md) documentation!
+## Neuerungen in diesem Fork
 
-## Background
+### Persistente Energiehistorie
 
-This project was started from [this](https://www.mikrocontroller.net/topic/525778) discussion (Mikrocontroller.net).
-It was the goal to replace the original Hoymiles DTU (Telemetry Gateway) with their cloud access. With a lot of reverse engineering the Hoymiles protocol was decrypted and analyzed.
+- lokale Speicherung auf LittleFS statt Cloud oder `config.json`
+- 5-Minuten-Verlauf fuer Gesamtanlage und einzelne Wechselrichter
+- Tages- und Monatsaggregate
+- Leistungsdiagramm mit Umschaltung:
+  - `Nur Messwerte`
+  - `24 h`
+  - `7 Tage`
+- transparente Pfeilnavigation direkt im Leistungsdiagramm
+- Tagesertragsdiagramm mit Monatsnavigation
+- Monats- und Jahresvergleich inklusive Summentabelle
+- Import, Export, Deep-Scan, Recovery und Loeschen von History-Dateien
+- API-Endpunkte unter `/api/energy/history...`
+- automatische Aktualisierung fuer aktuelle 5-Minuten-Ansichten
 
-## Documentation
+Technische Details zum Dateiformat und zur API stehen in
+[docs/EnergyHistory.md](docs/EnergyHistory.md).
 
-The documentation can be found [here](https://tbnobody.github.io/OpenDTU-docs/).
-Please feel free to support and create a PR in [this](https://github.com/tbnobody/OpenDTU-docs) repository to make the documentation even better.
+### Moduluebersicht
 
-## Breaking changes
+- zweite Live-Ansicht unter `/module-overview`
+- frei platzierbare Modulkarten
+- Editiermodus mit Raster, Zoom und explizitem Speichern
+- Heatmap-Modi fuer Leistung, Tagesertrag und Abweichungen
+- optionaler SVG-Hintergrundeditor
+- Statusfarben fuer deaktiviert, offline, idle und produzierend
+- Anzeige aktueller Modulwerte wie Leistung, Spannung, Strom und Tagesertrag
+- Layout-Persistenz in `module_overview.json`
 
-Generated using: `git log --date=short --pretty=format:"* %h%x09%ad%x09%s" | grep BREAKING`
+## Wichtiger Hardware-Hinweis
 
-```code
-* 8cab3335      2025-08-07      BREAKING CHANGE: WebAPI endpoint `/api/limit/config` requires different parameters
-* 8372deaf      2025-04-18      BREAKING CHANGE: Logging newline changed from "\r\n" to "\n"
-* 1b637f08      2024-01-30      BREAKING CHANGE: Web API Endpoint /api/livedata/status and /api/prometheus/metrics
-* e1564780      2024-01-30      BREAKING CHANGE: Web API Endpoint /api/livedata/status and /api/prometheus/metrics
-* f0b5542c      2024-01-30      BREAKING CHANGE: Web API Endpoint /api/livedata/status and /api/prometheus/metrics
-* c27ecc36      2024-01-29      BREAKING CHANGE: Web API Endpoint /api/livedata/status
-* 71d1b3b       2023-11-07      BREAKING CHANGE: Home Assistant Auto Discovery to new naming scheme
-* 04f62e0       2023-04-20      BREAKING CHANGE: Web API Endpoint /api/eventlog/status no nested serial object
-* 59f43a8       2023-04-17      BREAKING CHANGE: Web API Endpoint /api/devinfo/status requires GET parameter inv=
-* 318136d       2023-03-15      BREAKING CHANGE: Updated partition table: Make sure you have a configuration backup and completly reflash the device!
-* 3b7aef6       2023-02-13      BREAKING CHANGE: Web API!
-* d4c838a       2023-02-06      BREAKING CHANGE: Prometheus API!
-* daf847e       2022-11-14      BREAKING CHANGE: Removed deprecated config parsing method
-* 69b675b       2022-11-01      BREAKING CHANGE: Structure WebAPI /api/livedata/status changed
-* 27ed4e3       2022-10-31      BREAKING: Change power factor from percent value to value between 0 and 1
+Die Energiehistorie benoetigt zwingend einen ESP32-S3 mit 16 MB Flash.
+Ein normaler 4-MB-ESP32 hat nicht genug Flash-Reserve fuer Firmware,
+Weboberflaeche und dauerhaft gespeicherte History-Daten.
+
+Empfohlen ist ein ESP32-S3-WROOM-1-N16R8 oder ein kompatibles Board mit:
+
+- ESP32-S3
+- 16 MB Flash
+- optional PSRAM, empfohlen fuer Reserve
+- passender 16-MB-Partitionstabelle
+
+![ESP32-S3-WROOM-1-N16R8 mit 16 MB Flash](docs/ESP32-S3-WROOM1%20N16R8.jpeg)
+
+Passende PlatformIO-Umgebungen:
+
+```text
+generic_esp32s3_16mb_energy_history
+generic_esp32s3_usb_16mb_energy_history
+generic_esp32s3_usb_16mb_energy_history_psram
 ```
 
-## Currently supported Inverters
+Fuer das gezeigte ESP32-S3-WROOM-1-N16R8-Board ist insbesondere diese Umgebung
+gedacht:
 
-A list of all currently supported inverters can be found [here](https://www.opendtu.solar/hardware/inverter_overview/)
+```text
+generic_esp32s3_usb_16mb_energy_history_psram
+```
+
+## Screenshots
+
+Screenshots der neuen Ansichten folgen noch:
+
+- Moduluebersicht
+- Energiehistorie
+
+Empfohlene Ablage, damit GitHub sie direkt in dieser README anzeigen kann:
+
+```text
+docs/screenshots/module-overview.png
+docs/screenshots/energy-history.png
+```
+
+Danach koennen sie hier eingebunden werden:
+
+```markdown
+![Moduluebersicht](docs/screenshots/module-overview.png)
+![Energiehistorie](docs/screenshots/energy-history.png)
+```
+
+## Build
+
+Beispiel fuer das empfohlene 16-MB-ESP32-S3-Board:
+
+```powershell
+pio run -e generic_esp32s3_usb_16mb_energy_history_psram
+```
+
+Weitere Energy-History-Umgebungen sind in [platformio.ini](platformio.ini)
+definiert. Die Energy-History-Builds aktivieren `ENERGY_HISTORY_ENABLE` und
+nutzen `partitions_custom_16mb_energy_history.csv`.
+
+## Upgrade- und Migrationshinweise
+
+- Fuer Energy History ist ein kompletter Flash mit der 16-MB-Partitionstabelle
+  erforderlich.
+- Vor einem Wechsel von einem normalen OpenDTU-Build auf diesen Fork sollte die
+  Konfiguration gesichert werden.
+- Die gespeicherte Energiehistorie liegt unter `/energy/` auf LittleFS.
+- Import/Export der History-Dateien ist ueber die Weboberflaeche moeglich.
+
+## Upstream OpenDTU
+
+Dieses Projekt basiert auf OpenDTU:
+
+- Repository: <https://github.com/tbnobody/OpenDTU>
+- Dokumentation: <https://tbnobody.github.io/OpenDTU-docs/>
+- Unterstuetzte Wechselrichter:
+  <https://www.opendtu.solar/hardware/inverter_overview/>
+
+Das urspruengliche Ziel von OpenDTU bleibt unveraendert: eine lokale,
+cloudfreie Alternative zur Hoymiles-DTU.
