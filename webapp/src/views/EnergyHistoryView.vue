@@ -145,6 +145,15 @@
                 </div>
             </div>
             <div class="energy-history-chart energy-history-chart-main">
+                <button
+                    v-if="resolution === '5m'"
+                    type="button"
+                    class="energy-history-chart-nav energy-history-chart-nav-left"
+                    :title="$t('energyhistory.PreviousPeriod')"
+                    @click="shiftPowerChartPeriod(-1)"
+                >
+                    <BIconChevronLeft />
+                </button>
                 <ChartComponent
                     v-if="chartHasData"
                     type="bar"
@@ -154,6 +163,15 @@
                 />
                 <div v-else-if="historyLoading" class="text-center text-muted py-4">{{ $t('base.Loading') }}</div>
                 <div v-else class="text-center text-muted py-4">{{ $t('energyhistory.NoData') }}</div>
+                <button
+                    v-if="resolution === '5m'"
+                    type="button"
+                    class="energy-history-chart-nav energy-history-chart-nav-right"
+                    :title="$t('energyhistory.NextPeriod')"
+                    @click="shiftPowerChartPeriod(1)"
+                >
+                    <BIconChevronRight />
+                </button>
             </div>
             <div class="mt-4">
                 <div
@@ -180,6 +198,14 @@
                     </div>
                 </div>
                 <div class="energy-history-chart energy-history-chart-daily">
+                    <button
+                        type="button"
+                        class="energy-history-chart-nav energy-history-chart-nav-left"
+                        :title="$t('energyhistory.PreviousPeriod')"
+                        @click="shiftDailyEnergyPeriod(-1)"
+                    >
+                        <BIconChevronLeft />
+                    </button>
                     <ChartComponent
                         v-if="!dailyEnergyLoading && dailyEnergyHistories.some((history) => history.data.length > 0)"
                         type="bar"
@@ -189,6 +215,14 @@
                     />
                     <div v-else-if="dailyEnergyLoading" class="text-center text-muted py-4">{{ $t('base.Loading') }}</div>
                     <div v-else class="text-center text-muted py-4">{{ $t('energyhistory.NoData') }}</div>
+                    <button
+                        type="button"
+                        class="energy-history-chart-nav energy-history-chart-nav-right"
+                        :title="$t('energyhistory.NextPeriod')"
+                        @click="shiftDailyEnergyPeriod(1)"
+                    >
+                        <BIconChevronRight />
+                    </button>
                 </div>
             </div>
             <div class="mt-4">
@@ -455,6 +489,7 @@ export default defineComponent({
             historyFiles: [] as EnergyHistoryFile[],
             histories: [] as EnergyHistorySeries[],
             dailyEnergyHistories: [] as EnergyHistorySeries[],
+            dailyEnergyMonth: localMonthInputValue(),
             drillDownMode: false,
             fiveMinuteAxisMode: 'data' as FiveMinuteAxisMode,
             dailyEnergyStacked: true,
@@ -936,6 +971,10 @@ export default defineComponent({
                     const filesChanged = this.lastHistoryFileRevision !== 0 && fileRevision !== this.lastHistoryFileRevision;
                     this.lastHistoryDataRevision = dataRevision;
                     this.lastHistoryFileRevision = fileRevision;
+                    if (!this.shouldAutoRefreshHistory()) {
+                        return;
+                    }
+
                     if (filesChanged) {
                         this.loadHistoryFileList()
                             .then(() => this.loadHistory());
@@ -950,6 +989,9 @@ export default defineComponent({
             this.loadHistoryFileList()
                 .then(() => this.loadHistory());
             this.clearMonthlyComparison();
+        },
+        shouldAutoRefreshHistory(): boolean {
+            return this.resolution !== '5m' || this.fiveMinuteAxisMode !== 'week';
         },
         loadLiveTotal() {
             return fetch('/api/livedata/status', { headers: authHeader() })
@@ -1002,6 +1044,7 @@ export default defineComponent({
                 data: [],
             }));
             if (loadDailyEnergy) {
+                this.dailyEnergyMonth = this.selectedDailyEnergyMonth();
                 this.dailyEnergyHistories = [];
                 this.dailyEnergyLoadId++;
                 this.dailyEnergyLoading = true;
@@ -1434,6 +1477,25 @@ export default defineComponent({
             this.hideMonthlyComparison();
             this.loadHistory();
         },
+        shiftPowerChartPeriod(direction: number) {
+            if (this.resolution !== '5m') {
+                return;
+            }
+
+            this.drillDownMode = false;
+            const date = this.parseDateInput(this.query.date);
+            const dayStep = this.fiveMinuteAxisMode === 'week' ? 7 : 1;
+            date.setDate(date.getDate() + direction * dayStep);
+            this.query.date = localDateInputValue(date);
+            this.hideMonthlyComparison();
+            this.loadHistory(false);
+        },
+        shiftDailyEnergyPeriod(direction: number) {
+            const date = this.parseMonthInput(this.dailyEnergyMonth);
+            date.setMonth(date.getMonth() + direction);
+            this.dailyEnergyMonth = localMonthInputValue(date);
+            this.loadDailyEnergyHistory();
+        },
         resetToCurrentPeriod() {
             const now = new Date();
             this.drillDownMode = false;
@@ -1542,14 +1604,18 @@ export default defineComponent({
 
             return this.formatDayOfYear(range.year, row.day_of_year).substring(8, 10);
         },
-        currentMonthDayRange(): { year: number; from: number; to: number } {
+        selectedDailyEnergyMonth(): string {
             if (this.query.view === 'day') {
-                return this.monthDayRange(this.query.date.substring(0, 7));
+                return this.query.date.substring(0, 7);
             }
             if (this.query.view === 'month') {
-                return this.monthDayRange(this.query.month);
+                return this.query.month;
             }
-            return this.monthDayRange(localMonthInputValue(new Date(this.query.year, new Date().getMonth(), 1)));
+
+            return localMonthInputValue(new Date(this.query.year, new Date().getMonth(), 1));
+        },
+        currentMonthDayRange(): { year: number; from: number; to: number } {
+            return this.monthDayRange(this.dailyEnergyMonth);
         },
         monthDayRange(value: string): { year: number; from: number; to: number } {
             const parts = value.split('-');
@@ -1747,6 +1813,37 @@ export default defineComponent({
 .energy-history-chart {
     position: relative;
     width: 100%;
+}
+
+.energy-history-chart-nav {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    z-index: 2;
+    width: 3rem;
+    border: 0;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    color: rgba(var(--bs-body-color-rgb), 0.35);
+    font-size: 1.75rem;
+    transition: background-color 0.15s ease-in-out, color 0.15s ease-in-out;
+}
+
+.energy-history-chart-nav:hover,
+.energy-history-chart-nav:focus-visible {
+    background: rgba(var(--bs-body-color-rgb), 0.06);
+    color: rgba(var(--bs-body-color-rgb), 0.72);
+}
+
+.energy-history-chart-nav-left {
+    left: 0;
+}
+
+.energy-history-chart-nav-right {
+    right: 0;
 }
 
 .energy-history-chart-main {
