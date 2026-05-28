@@ -212,9 +212,9 @@ Monthly aggregates are derived from daily aggregate records for the completed
 local month. `yieldWh` is the sum of daily yields, `maxPowerW` is the highest
 daily max power, and `runtimeMin` is the sum of daily runtime minutes.
 
-The manual probe build also writes deterministic demo history for API/UI tests
-under June 2099. These files are intentionally persistent and are overwritten on
-the next probe boot.
+The manual probe code path can write deterministic demo history for API/UI tests
+under June 2099. These files are intentionally persistent and are overwritten
+when the probe is executed.
 
 ## Runtime Behaviour
 
@@ -233,19 +233,27 @@ samples use the inverter `YieldDay` value from `TYPE_INV / CH0 / FLD_YD`.
 
 The first loop execution for a new local date finalizes the previously sampled
 local day for total and for every poll-enabled inverter. When the local month
-changed, it also finalizes the previous month.
+changed, it also finalizes the previous month. Failed finalizations are queued
+and retried in small batches on later loop executions so transient read/write
+failures do not permanently lose the aggregate.
 
 Runtime startup recovery is not executed automatically from the scheduler,
 because scanning all files can block other scheduler-driven services. Recovery
 can be requested through the Web API. Before appending, a failed append attempts
 to recover a truncatable final block and then retries the append once.
 
+Changes to history data and managed files increment in-memory revision counters.
+`markDataChanged()` increments only the data revision. `markFilesChanged()`
+increments both data and file revisions, because file imports/deletes can change
+query results and the visible file list.
+
 ## Backend Query Surface
 
 The firmware exposes narrow backend methods for future Web API use:
 
 ```text
-status scan across energy files
+lightweight status scan across energy files
+revision counters for UI polling
 5m query for one target and one local day
 day query for one target and a day-of-year range
 month query for one target and a month range
@@ -257,7 +265,34 @@ request an unbounded monthly dump.
 Queries return deduplicated logical records. If multiple valid records exist for
 the same key, the last valid record wins.
 
+Day queries first read persisted day records. Missing requested days are rebuilt
+from the corresponding five-minute month file when possible, returned to the
+caller, and persisted back into the day file in append blocks.
+
+Month queries first read persisted month records. Missing requested months are
+rebuilt from day records when possible. A month query rebuilds at most one
+missing month per request to avoid long blocking work in the async web-server
+task. The rebuilt month is returned immediately and then persisted when the
+write succeeds. Repeated UI/API polling therefore fills missing month aggregates
+progressively.
+
 ## Web API
+
+Revision:
+
+```text
+GET /api/energy/history/revision
+```
+
+Response:
+
+```text
+data_revision
+file_revision
+last_change_ms
+recovery_pending
+recovery_running
+```
 
 Status:
 
@@ -265,7 +300,9 @@ Status:
 GET /api/energy/history/status
 ```
 
-The status response contains aggregate scan counters and LittleFS usage:
+The status response is intentionally lightweight. It counts managed history
+files and bytes and reports LittleFS usage plus recovery state. It does not deep
+scan every block; use the file scan endpoint for block/record validation.
 
 ```text
 files_scanned
@@ -316,6 +353,20 @@ interval_sec        only for 5m
 count
 data[]
 scan
+```
+
+The `scan` object contains:
+
+```text
+files_scanned
+valid_blocks
+skipped_blocks
+valid_records
+skipped_records
+file_size
+last_valid_offset
+invalid_final_block
+can_truncate_final_block
 ```
 
 Five-minute rows:
@@ -408,9 +459,15 @@ POST /api/energy/history/file/upload?file=/energy/5m/total_YYYY_MM.eh5
 Uploads are first written to `<target>.upload` and then renamed over the target
 path when the upload finishes.
 
+File imports, deletes, and completed uploads call `markFilesChanged()`, which
+updates both revision counters. Downloads and read-only scans do not change
+revisions.
+
 ## Web UI
 
-The energy history view loads `total` plus all configured inverters. Inverter
+The energy history view shows current total live values, loads `total` plus all
+configured inverters, and polls the revision endpoint to refresh when history
+data, file imports, recovery, or deletes change the backend state. Inverter
 target IDs are built from the configured hexadecimal serial converted to the
 decimal `inv_<serial>` form used by the backend.
 
@@ -423,17 +480,24 @@ Year view     -> resolution=month, month range 1..12
 ```
 
 The chart overlays total power, per-inverter power, and cumulative total energy.
-For five-minute data the frontend fills the chart axis from the first to the
-last present slot and leaves missing slots as gaps.
+For five-minute data the frontend can show either the data range from the first
+to the last present slot or a fixed full-day axis. Missing slots remain gaps.
 
 A secondary daily-energy chart is loaded for inverter targets for the currently
-selected month. The manual probe demo inverters are shown automatically for
-June 2099 when those targets are not present in the normal inverter list.
+selected month. It can render inverter energy stacked or as separate bars. The
+manual probe demo inverters are shown automatically for June 2099 when those
+targets are not present in the normal inverter list.
+
+The comparison area can load the available years from managed `total` files and
+render a month-by-month yearly comparison, a yearly total comparison, and a
+summary table.
 
 The data-management panel can list files, select a file, preview the file
 through the normal history API, download, deep-scan, recover, delete, and upload
-history files. For five-minute files the preview starts at the first day of the
-file month and searches forward for the first day containing data.
+history files. It supports multi-file upload, selected-file bulk download,
+upload progress with retry/cancel state, and per-file raw scan output. For
+five-minute files the preview starts at the first day of the file month and
+searches forward for the first day containing data.
 
 ## Retention
 

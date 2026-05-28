@@ -121,18 +121,26 @@
                     <button
                         type="button"
                         class="btn"
-                        :class="fixedDayAxis ? 'btn-outline-secondary' : 'btn-primary'"
-                        @click="fixedDayAxis = false"
+                        :class="fiveMinuteAxisMode === 'data' ? 'btn-primary' : 'btn-outline-secondary'"
+                        @click="setFiveMinuteAxisMode('data')"
                     >
                         {{ $t('energyhistory.DataRange') }}
                     </button>
                     <button
                         type="button"
                         class="btn"
-                        :class="fixedDayAxis ? 'btn-primary' : 'btn-outline-secondary'"
-                        @click="fixedDayAxis = true"
+                        :class="fiveMinuteAxisMode === 'day' ? 'btn-primary' : 'btn-outline-secondary'"
+                        @click="setFiveMinuteAxisMode('day')"
                     >
                         {{ $t('energyhistory.FullDayAxis') }}
+                    </button>
+                    <button
+                        type="button"
+                        class="btn"
+                        :class="fiveMinuteAxisMode === 'week' ? 'btn-primary' : 'btn-outline-secondary'"
+                        @click="setFiveMinuteAxisMode('week')"
+                    >
+                        {{ $t('energyhistory.SevenDayAxis') }}
                     </button>
                 </div>
             </div>
@@ -304,6 +312,7 @@ ChartJS.register(CategoryScale, LinearScale, BarController, LineController, BarE
 
 type Resolution = '5m' | 'day' | 'month';
 type ViewMode = 'day' | 'month' | 'year';
+type FiveMinuteAxisMode = 'data' | 'day' | 'week';
 
 interface EnergyHistoryStatus {
     files_scanned?: number;
@@ -326,6 +335,8 @@ interface EnergyHistoryRevision {
 interface EnergyHistoryRow {
     day?: number;
     slot?: number;
+    chart_slot?: number;
+    chart_date?: string;
     day_of_year?: number;
     month?: number;
     yield_wh?: number;
@@ -445,7 +456,7 @@ export default defineComponent({
             histories: [] as EnergyHistorySeries[],
             dailyEnergyHistories: [] as EnergyHistorySeries[],
             drillDownMode: false,
-            fixedDayAxis: false,
+            fiveMinuteAxisMode: 'data' as FiveMinuteAxisMode,
             dailyEnergyStacked: true,
             query: {
                 view: 'day' as ViewMode,
@@ -526,7 +537,7 @@ export default defineComponent({
                 ? totalHistory
                 : this.histories.find((history) => history.data.length > 0);
             const labels = this.resolution === '5m'
-                ? fiveMinuteSlots.map((slot) => this.formatSlotTime(slot))
+                ? fiveMinuteSlots.map((slot) => this.formatFiveMinuteAxisLabel(slot))
                 : reference?.data.map((row) => this.firstColumnValue(row).toString()) || [];
             const powerKey = this.resolution === '5m' ? 'avg_power_w' : 'max_power_w';
             const totalPowerDataset = totalHistory && totalHistory.data.length > 0
@@ -1131,6 +1142,10 @@ export default defineComponent({
             this.loadHistory();
         },
         loadTargetHistory(target: EnergyHistorySeries): Promise<EnergyHistorySeries> {
+            if (this.resolution === '5m' && this.fiveMinuteAxisMode === 'week') {
+                return this.loadSevenDayTargetHistory(target);
+            }
+
             const params = new URLSearchParams();
             params.set('resolution', this.resolution);
             params.set('target', target.id);
@@ -1162,6 +1177,40 @@ export default defineComponent({
                         to: data.to,
                         interval_sec: data.interval_sec,
                         count: data.count,
+                    },
+                }))
+                .catch(() => ({
+                    ...target,
+                    data: [],
+                }));
+        },
+        loadSevenDayTargetHistory(target: EnergyHistorySeries): Promise<EnergyHistorySeries> {
+            const dates = this.sevenDayAxisDateValues();
+            const requests = dates.map((date, dayIndex) => {
+                const params = new URLSearchParams();
+                params.set('resolution', '5m');
+                params.set('target', target.id);
+                params.set('date', date);
+
+                return fetch('/api/energy/history?' + params.toString(), { headers: authHeader() })
+                    .then((response) => handleResponse(response, this.$emitter, this.$router, true))
+                    .then((data: EnergyHistoryResponse) => (data.data || []).map((row) => ({
+                        ...row,
+                        chart_slot: row.slot !== undefined ? dayIndex * 288 + row.slot : undefined,
+                        chart_date: date,
+                    } as EnergyHistoryRow)))
+                    .catch(() => [] as EnergyHistoryRow[]);
+            });
+
+            return Promise.all(requests)
+                .then((rowsByDay) => ({
+                    ...target,
+                    data: rowsByDay.flat(),
+                    metadata: {
+                        target: target.id,
+                        resolution: '5m',
+                        date: dates[dates.length - 1],
+                        count: rowsByDay.reduce((sum, rows) => sum + rows.length, 0),
                     },
                 }))
                 .catch(() => ({
@@ -1309,20 +1358,30 @@ export default defineComponent({
         },
         historyFileTargetsForCurrentPeriod(): string[] {
             const targets = new Set<string>();
-            let pattern: RegExp | null = null;
+            const patterns: RegExp[] = [];
 
             if (this.query.view === 'day') {
-                const date = this.parseDateInput(this.query.date);
-                pattern = new RegExp(`^/energy/5m/(inv_\\d+)_${date.getFullYear()}_${String(date.getMonth() + 1).padStart(2, '0')}\\.eh5$`);
+                const monthKeys = new Set<string>();
+                const dates = this.fiveMinuteAxisMode === 'week'
+                    ? this.sevenDayAxisDates()
+                    : [this.parseDateInput(this.query.date)];
+                dates.forEach((date) => {
+                    monthKeys.add(`${date.getFullYear()}_${String(date.getMonth() + 1).padStart(2, '0')}`);
+                });
+                monthKeys.forEach((monthKey) => {
+                    patterns.push(new RegExp(`^/energy/5m/(inv_\\d+)_${monthKey}\\.eh5$`));
+                });
             } else if (this.query.view === 'month') {
                 const date = this.parseMonthInput(this.query.month);
-                pattern = new RegExp(`^/energy/day/(inv_\\d+)_${date.getFullYear()}\\.ehd$`);
+                patterns.push(new RegExp(`^/energy/day/(inv_\\d+)_${date.getFullYear()}\\.ehd$`));
             } else {
-                pattern = new RegExp(`^/energy/month/(inv_\\d+)_${this.query.year}\\.ehm$`);
+                patterns.push(new RegExp(`^/energy/month/(inv_\\d+)_${this.query.year}\\.ehm$`));
             }
 
             this.historyFiles.forEach((file) => {
-                const match = file.path.match(pattern as RegExp);
+                const match = patterns
+                    .map((pattern) => file.path.match(pattern))
+                    .find((candidate) => candidate?.[1]);
                 if (match?.[1]) {
                     targets.add(match[1]);
                 }
@@ -1336,6 +1395,16 @@ export default defineComponent({
             const serial = targetId.startsWith('inv_') ? targetId.substring(4) : targetId;
             const configured = this.inverters.find((inverter) => this.hexSerialToDecimal(inverter.serial) === serial);
             return configured?.name || serial;
+        },
+        setFiveMinuteAxisMode(mode: FiveMinuteAxisMode) {
+            if (this.fiveMinuteAxisMode === mode) {
+                return;
+            }
+
+            this.fiveMinuteAxisMode = mode;
+            if (this.resolution === '5m') {
+                this.loadHistory(false);
+            }
         },
         setView(view: ViewMode) {
             this.drillDownMode = false;
@@ -1418,10 +1487,23 @@ export default defineComponent({
             return row.month !== undefined ? this.formatMonth(this.query.year, row.month) : '';
         },
         formatSlotTime(slot: number): string {
-            const minutes = slot * 5;
+            const minutes = (slot % 288) * 5;
             const hours = Math.floor(minutes / 60);
             const minute = minutes % 60;
             return `${String(hours).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+        },
+        formatFiveMinuteAxisLabel(slot: number): string {
+            if (this.fiveMinuteAxisMode !== 'week') {
+                return this.formatSlotTime(slot);
+            }
+
+            const date = this.sevenDayAxisDates()[Math.floor(slot / 288)];
+            const time = this.formatSlotTime(slot);
+            if (!date) {
+                return time;
+            }
+
+            return `${date.toLocaleDateString(this.$i18n.locale, { weekday: 'short', day: '2-digit', month: '2-digit' })} ${time}`;
         },
         formatDayOfYear(year: number, dayOfYear: number): string {
             const date = new Date(Date.UTC(year, 0, dayOfYear));
@@ -1503,13 +1585,16 @@ export default defineComponent({
             });
         },
         fiveMinuteChartSlots(histories: EnergyHistorySeries[]): number[] {
-            if (this.fixedDayAxis) {
+            if (this.fiveMinuteAxisMode === 'week') {
+                return Array.from({ length: 7 * 288 }, (_value, index) => index);
+            }
+            if (this.fiveMinuteAxisMode === 'day') {
                 return Array.from({ length: 288 }, (_value, index) => index);
             }
 
             const presentSlots = histories
                 .flatMap((history) => history.data)
-                .map((row) => row.slot)
+                .map((row) => this.fiveMinuteRowSlot(row))
                 .filter((slot): slot is number => slot !== undefined);
             if (presentSlots.length === 0) {
                 return [];
@@ -1540,11 +1625,26 @@ export default defineComponent({
         rowsBySlot(rows: EnergyHistoryRow[]): Map<number, { row: EnergyHistoryRow; index: number }> {
             const result = new Map<number, { row: EnergyHistoryRow; index: number }>();
             rows.forEach((row, index) => {
-                if (row.slot !== undefined) {
-                    result.set(row.slot, { row, index });
+                const slot = this.fiveMinuteRowSlot(row);
+                if (slot !== undefined) {
+                    result.set(slot, { row, index });
                 }
             });
             return result;
+        },
+        fiveMinuteRowSlot(row: EnergyHistoryRow): number | undefined {
+            return this.fiveMinuteAxisMode === 'week' ? row.chart_slot : row.slot;
+        },
+        sevenDayAxisDates(): Date[] {
+            const endDate = this.parseDateInput(this.query.date);
+            return Array.from({ length: 7 }, (_value, index) => {
+                const date = new Date(endDate);
+                date.setDate(endDate.getDate() - 6 + index);
+                return date;
+            });
+        },
+        sevenDayAxisDateValues(): string[] {
+            return this.sevenDayAxisDates().map((date) => localDateInputValue(date));
         },
         whToKwh(value: number): number {
             return value / 1000;
@@ -1580,10 +1680,14 @@ export default defineComponent({
             let prevRow = rows[index - 1];
 
             if (this.resolution === '5m' && currentYield > 0) {
+                const currentDate = row.chart_date;
                 for (let i = index - 1; i >= 0; i--) {
                     const candidate = rows[i];
                     if (!candidate || candidate.slot === undefined) {
                         continue;
+                    }
+                    if (currentDate !== undefined && candidate.chart_date !== currentDate) {
+                        break;
                     }
 
                     const candidateYield = candidate.yield_wh || 0;
@@ -1597,6 +1701,9 @@ export default defineComponent({
             if (!prevRow) {
                 return row.avg_power_w || 0;
             }
+            if (this.resolution === '5m' && row.chart_date !== undefined && prevRow.chart_date !== row.chart_date) {
+                return row.avg_power_w || 0;
+            }
 
             const prevYield = prevRow.yield_wh || 0;
             const yieldDelta = currentYield - prevYield;
@@ -1607,10 +1714,16 @@ export default defineComponent({
 
             let timeDeltaMinutes = 5;
 
-            if (this.resolution === '5m' && row.slot !== undefined && prevRow.slot !== undefined) {
-                let slotDelta = row.slot - prevRow.slot;
+            if (this.resolution === '5m') {
+                const currentSlot = this.fiveMinuteRowSlot(row);
+                const previousSlot = this.fiveMinuteRowSlot(prevRow);
+                if (currentSlot === undefined || previousSlot === undefined) {
+                    return row.avg_power_w || 0;
+                }
+
+                let slotDelta = currentSlot - previousSlot;
                 if (slotDelta < 0) {
-                    slotDelta = (288 - prevRow.slot) + row.slot;
+                    slotDelta = (288 - (previousSlot % 288)) + (currentSlot % 288);
                 }
                 timeDeltaMinutes = slotDelta * 5;
             } else if (this.resolution === 'day' && row.day_of_year !== undefined && prevRow.day_of_year !== undefined) {
