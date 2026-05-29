@@ -1865,6 +1865,19 @@ bool EnergyHistoryClass::queryDay(const TargetType targetType, const uint64_t se
         return false;
     }
 
+    tm currentLocalTime = {};
+    const bool hasCurrentLocalTime = getLocalTime(&currentLocalTime, 5);
+    const uint16_t currentYear = hasCurrentLocalTime ? static_cast<uint16_t>(currentLocalTime.tm_year + 1900) : 0;
+    const uint8_t currentMonth = hasCurrentLocalTime ? static_cast<uint8_t>(currentLocalTime.tm_mon + 1) : 0;
+    const uint8_t currentDay = hasCurrentLocalTime ? static_cast<uint8_t>(currentLocalTime.tm_mday) : 0;
+    const uint16_t currentDayOfYear = hasCurrentLocalTime ? dayOfYear(currentYear, currentMonth, currentDay) : 0;
+
+    auto isCurrentOpenDay = [&](const uint16_t dayOfYearValue) {
+        return hasCurrentLocalTime
+                && year == currentYear
+                && dayOfYearValue == currentDayOfYear;
+    };
+
     uint16_t missingDaysByMonth[12][31] = {};
     uint16_t missingDayCountByMonth[12] = {};
 
@@ -1882,7 +1895,7 @@ bool EnergyHistoryClass::queryDay(const TargetType targetType, const uint64_t se
             continue;
         }
 
-        if (existingRecord != nullptr) {
+        if (existingRecord != nullptr && !isCurrentOpenDay(dayOfYearValue)) {
             records[recordCount] = *existingRecord;
             recordCount++;
             continue;
@@ -1929,7 +1942,18 @@ bool EnergyHistoryClass::queryDay(const TargetType targetType, const uint64_t se
         result.skippedRecords += monthScan.skippedRecords;
 
         if (derivedRecordCount > 0) {
-            writeDayRecordsBatched(targetType, serial, year, derivedRecords, derivedRecordCount);
+            DayRecord persistRecords[31];
+            uint16_t persistRecordCount = 0;
+            for (uint16_t i = 0; i < derivedRecordCount; i++) {
+                if (!isCurrentOpenDay(derivedRecords[i].dayOfYear)) {
+                    persistRecords[persistRecordCount] = derivedRecords[i];
+                    persistRecordCount++;
+                }
+            }
+
+            if (persistRecordCount > 0) {
+                writeDayRecordsBatched(targetType, serial, year, persistRecords, persistRecordCount);
+            }
         }
 
         for (uint16_t i = 0; i < derivedRecordCount; i++) {
@@ -2030,6 +2054,21 @@ bool EnergyHistoryClass::queryMonth(const TargetType targetType, const uint64_t 
         }
     }
 
+    tm currentLocalTime = {};
+    const bool hasCurrentLocalTime = getLocalTime(&currentLocalTime, 5);
+    const uint16_t currentYear = hasCurrentLocalTime ? static_cast<uint16_t>(currentLocalTime.tm_year + 1900) : 0;
+    const uint8_t currentMonth = hasCurrentLocalTime ? static_cast<uint8_t>(currentLocalTime.tm_mon + 1) : 0;
+
+    auto sameMonthRecord = [](const MonthRecord& lhs, const MonthRecord& rhs) {
+        return lhs.month == rhs.month
+                && lhs.yieldWh == rhs.yieldWh
+                && lhs.maxPowerW == rhs.maxPowerW
+                && lhs.avgPowerW == rhs.avgPowerW
+                && lhs.runtimeMin == rhs.runtimeMin
+                && lhs.dayCount == rhs.dayCount
+                && lhs.flags == rhs.flags;
+    };
+
     uint8_t rebuildCount = 0;
     MonthRecord derivedRecords[MaxMonthRebuildsPerQuery];
     uint16_t derivedRecordCount = 0;
@@ -2037,7 +2076,10 @@ bool EnergyHistoryClass::queryMonth(const TargetType targetType, const uint64_t 
     for (uint8_t monthValue = fromMonth;
             monthValue <= toMonth && rebuildCount < MaxMonthRebuildsPerQuery;
             monthValue++) {
-        if (monthPresent[monthValue - 1]) {
+        const bool currentOpenMonth = hasCurrentLocalTime
+                && year == currentYear
+                && monthValue == currentMonth;
+        if (monthPresent[monthValue - 1] && !currentOpenMonth) {
             continue;
         }
 
@@ -2089,14 +2131,30 @@ bool EnergyHistoryClass::queryMonth(const TargetType targetType, const uint64_t 
             continue;
         }
 
+        const MonthRecord* existingRecord = nullptr;
+        for (uint16_t i = 0; i < allRecordCount; i++) {
+            if (allRecords[i].month == monthValue) {
+                existingRecord = &allRecords[i];
+                break;
+            }
+        }
+
+        if (currentOpenMonth && existingRecord != nullptr && sameMonthRecord(*existingRecord, monthRecord)) {
+            monthPresent[monthValue - 1] = true;
+            rebuildCount++;
+            continue;
+        }
+
         if (!upsertMonthRecord(allRecords.get(), 12, allRecordCount, monthRecord)) {
             result.skippedRecords++;
             continue;
         }
 
         monthPresent[monthValue - 1] = true;
-        derivedRecords[derivedRecordCount] = monthRecord;
-        derivedRecordCount++;
+        if (!currentOpenMonth) {
+            derivedRecords[derivedRecordCount] = monthRecord;
+            derivedRecordCount++;
+        }
         rebuildCount++;
     }
 

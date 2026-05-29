@@ -1683,9 +1683,27 @@ export default defineComponent({
         },
         fiveMinuteEnergyData(history: EnergyHistorySeries, slots: number[]): Array<number | null> {
             const bySlot = this.rowsBySlot(history.data);
+            let currentDate: string | undefined;
+            let completedDayYieldWh = 0;
+            let currentDayYieldWh = 0;
+
             return slots.map((slot) => {
                 const entry = bySlot.get(slot);
-                return entry ? this.whToKwh(entry.row.yield_wh || 0) : null;
+                if (!entry) {
+                    return null;
+                }
+
+                const rowDate = entry.row.chart_date || '';
+                if (currentDate === undefined) {
+                    currentDate = rowDate;
+                } else if (rowDate !== currentDate) {
+                    completedDayYieldWh += currentDayYieldWh;
+                    currentDayYieldWh = 0;
+                    currentDate = rowDate;
+                }
+
+                currentDayYieldWh = Math.max(currentDayYieldWh, entry.row.yield_wh || 0);
+                return this.whToKwh(completedDayYieldWh + currentDayYieldWh);
             });
         },
         rowsBySlot(rows: EnergyHistoryRow[]): Map<number, { row: EnergyHistoryRow; index: number }> {
