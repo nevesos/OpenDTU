@@ -699,16 +699,16 @@ export default defineComponent({
                 },
             };
         },
-        dailyEnergyChartData(): ChartData<'bar', number[], string> {
-            const reference = this.dailyEnergyHistories.find((history) => history.data.length > 0);
+        dailyEnergyChartData(): ChartData<'bar', Array<number | null>, string> {
+            const dayRange = this.dailyEnergyDayValues();
             return {
-                labels: reference?.data.map((row) => this.dailyEnergyLabel(row)) || [],
+                labels: dayRange.map((dayOfYear) => this.dailyEnergyLabel(dayOfYear)),
                 datasets: this.dailyEnergyHistories
                     .filter((history) => history.data.length > 0)
                     .map((history) => ({
                         type: 'bar' as const,
                         label: history.label,
-                        data: history.data.map((row) => this.whToKwh(row.yield_wh || 0)),
+                        data: this.dailyEnergyValues(history.data, dayRange),
                         borderColor: history.color,
                         backgroundColor: this.withAlpha(history.color, 0.72),
                         borderWidth: 1,
@@ -756,7 +756,7 @@ export default defineComponent({
                                 }
 
                                 const total = this.dailyEnergyHistories.reduce((sum, history) => {
-                                    return sum + this.whToKwh(history.data[dataIndex]?.yield_wh || 0);
+                                    return sum + (this.dailyEnergyValues(history.data, this.dailyEnergyDayValues())[dataIndex] || 0);
                                 }, 0);
                                 return `${this.$t('energyhistory.Total')}: ${this.$n(total)} kWh`;
                             },
@@ -1149,16 +1149,14 @@ export default defineComponent({
             const range = this.monthDayRange(this.query.month);
             this.openDay(range.year, row.day_of_year);
         },
-        openDailyEnergyDay(datasetIndex: number, dataIndex: number) {
-            const histories = this.dailyEnergyHistories.filter((history) => history.data.length > 0);
-            const clickedRow = histories[datasetIndex]?.data[dataIndex]
-                    || histories.find((history) => history.data[dataIndex])?.data[dataIndex];
-            if (!clickedRow || clickedRow.day_of_year === undefined) {
+        openDailyEnergyDay(_datasetIndex: number, dataIndex: number) {
+            const dayOfYear = this.dailyEnergyDayValues()[dataIndex];
+            if (dayOfYear === undefined) {
                 return;
             }
 
             const range = this.currentMonthDayRange();
-            this.openDay(range.year, clickedRow.day_of_year);
+            this.openDay(range.year, dayOfYear);
         },
         openDay(year: number, dayOfYear: number) {
             this.drillDownMode = true;
@@ -1596,13 +1594,30 @@ export default defineComponent({
         yearlyComparisonValue(rows: EnergyHistoryRow[]): number {
             return rows.reduce((sum, row) => sum + this.whToKwh(row.yield_wh || 0), 0);
         },
-        dailyEnergyLabel(row: EnergyHistoryRow): string {
+        dailyEnergyLabel(dayOfYear: number): string {
             const range = this.currentMonthDayRange();
-            if (row.day_of_year === undefined) {
-                return '';
+            return this.formatDayOfYear(range.year, dayOfYear).substring(8, 10);
+        },
+        dailyEnergyDayValues(): number[] {
+            const range = this.currentMonthDayRange();
+            const days: number[] = [];
+            for (let day = range.from; day <= range.to; day++) {
+                days.push(day);
             }
+            return days;
+        },
+        dailyEnergyValues(rows: EnergyHistoryRow[], dayRange: number[]): Array<number | null> {
+            const byDay = new Map<number, EnergyHistoryRow>();
+            rows.forEach((row) => {
+                if (row.day_of_year !== undefined) {
+                    byDay.set(row.day_of_year, row);
+                }
+            });
 
-            return this.formatDayOfYear(range.year, row.day_of_year).substring(8, 10);
+            return dayRange.map((dayOfYear) => {
+                const row = byDay.get(dayOfYear);
+                return row ? this.whToKwh(row.yield_wh || 0) : null;
+            });
         },
         selectedDailyEnergyMonth(): string {
             if (this.query.view === 'day') {
@@ -1684,7 +1699,6 @@ export default defineComponent({
         fiveMinuteEnergyData(history: EnergyHistorySeries, slots: number[]): Array<number | null> {
             const bySlot = this.rowsBySlot(history.data);
             let currentDate: string | undefined;
-            let completedDayYieldWh = 0;
             let currentDayYieldWh = 0;
 
             return slots.map((slot) => {
@@ -1697,13 +1711,12 @@ export default defineComponent({
                 if (currentDate === undefined) {
                     currentDate = rowDate;
                 } else if (rowDate !== currentDate) {
-                    completedDayYieldWh += currentDayYieldWh;
                     currentDayYieldWh = 0;
                     currentDate = rowDate;
                 }
 
                 currentDayYieldWh = Math.max(currentDayYieldWh, entry.row.yield_wh || 0);
-                return this.whToKwh(completedDayYieldWh + currentDayYieldWh);
+                return this.whToKwh(currentDayYieldWh);
             });
         },
         rowsBySlot(rows: EnergyHistoryRow[]): Map<number, { row: EnergyHistoryRow; index: number }> {
