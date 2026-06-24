@@ -302,6 +302,7 @@ export default defineComponent({
                 { key: 0, value: 'off' },
                 { key: 1, value: 'small' },
                 { key: 2, value: 'fullscreen' },
+                { key: 3, value: 'power' },
             ],
         };
     },

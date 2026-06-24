@@ -692,6 +692,7 @@
         "off": "Off",
         "small": "Small",
         "fullscreen": "Fullscreen",
+        "power": "Power",
         "DiagramDuration": "Diagram duration",
         "DiagramDurationHint": "The time period which is shown in the diagram.",
         "Seconds": "Seconds",

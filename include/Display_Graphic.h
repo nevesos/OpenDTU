@@ -28,6 +28,7 @@ enum DiagramMode_t {
     Off,
     Small,
     Fullscreen,
+    Power,
     DisplayMode_Max,
 };
 
@@ -52,6 +53,9 @@ public:
 private:
     void loop();
     void printText(const char* text, const uint8_t line);
+    void printPowerMode();
+    uint8_t getEnabledInverterCount();
+    bool getEnabledInverterPower(const uint8_t selected, uint8_t& inverterNumber, float& watts, bool& reachable);
     void calcLineHeights();
     void setFont(const uint8_t line);
     bool isValidDisplay();

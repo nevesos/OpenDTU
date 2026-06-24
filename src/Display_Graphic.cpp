@@ -7,6 +7,7 @@
 #include "Datastore.h"
 #include "I18n.h"
 #include "PinMapping.h"
+#include <Hoymiles.h>
 #include <NetworkSettings.h>
 #include <map>
 #include <time.h>
@@ -213,6 +214,9 @@ void DisplayGraphicClass::setDiagramMode(DiagramMode_t mode)
 {
     if (mode < DiagramMode_t::DisplayMode_Max) {
         _diagram_mode = mode;
+        if (isValidDisplay()) {
+            calcLineHeights();
+        }
     }
 }
 
@@ -230,6 +234,131 @@ void DisplayGraphicClass::setStartupDisplay()
 DisplayGraphicDiagramClass& DisplayGraphicClass::Diagram()
 {
     return _diagram;
+}
+
+uint8_t DisplayGraphicClass::getEnabledInverterCount()
+{
+    uint8_t count = 0;
+    for (uint8_t i = 0; i < Hoymiles.getNumInverters(); i++) {
+        auto inv = Hoymiles.getInverterByPos(i);
+        if (inv == nullptr) {
+            continue;
+        }
+
+        auto cfg = Configuration.getInverterConfig(inv->serial());
+        if (cfg != nullptr && inv->getEnablePolling()) {
+            count++;
+        }
+    }
+    return count;
+}
+
+bool DisplayGraphicClass::getEnabledInverterPower(const uint8_t selected, uint8_t& inverterNumber, float& watts, bool& reachable)
+{
+    uint8_t enabledIndex = 0;
+    for (uint8_t i = 0; i < Hoymiles.getNumInverters(); i++) {
+        auto inv = Hoymiles.getInverterByPos(i);
+        if (inv == nullptr) {
+            continue;
+        }
+
+        auto cfg = Configuration.getInverterConfig(inv->serial());
+        if (cfg == nullptr || !inv->getEnablePolling()) {
+            continue;
+        }
+
+        if (enabledIndex++ != selected) {
+            continue;
+        }
+
+        inverterNumber = i + 1;
+        watts = 0;
+        reachable = inv->isReachable();
+        if (reachable) {
+            for (auto& c : inv->Statistics()->getChannelsByType(TYPE_AC)) {
+                watts += inv->Statistics()->getChannelFieldValue(TYPE_AC, c, FLD_PAC);
+            }
+        }
+        return true;
+    }
+
+    return false;
+}
+
+void DisplayGraphicClass::printPowerMode()
+{
+    const int16_t displayWidth = _display->getDisplayWidth();
+    const int16_t displayHeight = _display->getDisplayHeight();
+    if (_display_type != DisplayType_t::SH1106 || displayWidth != 128 || displayHeight != 64) {
+        return;
+    }
+
+    const float totalPower = Datastore.getTotalAcPowerEnabled();
+    const uint32_t totalWatts = static_cast<uint32_t>((totalPower > 0 ? totalPower : 0) + 0.5f);
+
+    char powerText[8];
+    snprintf(powerText, sizeof(powerText), "%" PRIu32, totalWatts);
+
+    const uint8_t* numberFont = u8g2_font_logisoso32_tn;
+    _display->setFont(numberFont);
+    uint8_t numberWidth = _display->getStrWidth(powerText);
+    _display->setFont(u8g2_font_ncenB14_tr);
+    const uint8_t unitWidth = _display->getStrWidth("W");
+
+    if (numberWidth + unitWidth + 4 > displayWidth) {
+        numberFont = u8g2_font_logisoso30_tn;
+        _display->setFont(numberFont);
+        numberWidth = _display->getStrWidth(powerText);
+    }
+    if (numberWidth + unitWidth + 4 > displayWidth) {
+        numberFont = u8g2_font_logisoso28_tn;
+        _display->setFont(numberFont);
+        numberWidth = _display->getStrWidth(powerText);
+    }
+    if (numberWidth + unitWidth + 4 > displayWidth) {
+        numberFont = u8g2_font_logisoso24_tn;
+        _display->setFont(numberFont);
+        numberWidth = _display->getStrWidth(powerText);
+    }
+
+    int16_t powerX = (displayWidth - numberWidth - unitWidth - 4) / 2;
+    if (powerX < 0) {
+        powerX = 0;
+    }
+    _display->setFont(numberFont);
+    _display->drawStr(powerX, 39, powerText);
+    _display->setFont(u8g2_font_ncenB14_tr);
+    _display->drawStr(powerX + numberWidth + 4, 36, "W");
+
+    _display->drawHLine(4, 45, displayWidth - 8);
+
+    char inverterText[32];
+    const uint8_t inverterCount = getEnabledInverterCount();
+    if (inverterCount == 0) {
+        snprintf(inverterText, sizeof(inverterText), "WR Offline");
+    } else {
+        const uint8_t selected = (_mExtra / 3) % inverterCount;
+        uint8_t inverterNumber = 0;
+        float inverterPower = 0;
+        bool reachable = false;
+        if (getEnabledInverterPower(selected, inverterNumber, inverterPower, reachable)) {
+            if (reachable) {
+                snprintf(inverterText, sizeof(inverterText), "%u. WR %u W", inverterNumber, static_cast<unsigned int>(inverterPower + 0.5f));
+            } else {
+                snprintf(inverterText, sizeof(inverterText), "%u. WR Offline", inverterNumber);
+            }
+        } else {
+            snprintf(inverterText, sizeof(inverterText), "WR Offline");
+        }
+    }
+
+    _display->setFont(u8g2_font_ncenB10_tr);
+    int16_t inverterX = (displayWidth - _display->getStrWidth(inverterText)) / 2;
+    if (inverterX < 0) {
+        _display->setFont(u8g2_font_5x8_tr);
+        inverterX = (displayWidth - _display->getStrWidth(inverterText)) / 2;
+    }
+    _display->drawStr(inverterX > 0 ? inverterX : 0, 61, inverterText);
 }
 
 void DisplayGraphicClass::loop()
@@ -253,6 +382,12 @@ void DisplayGraphicClass::loop()
                 // Every 10 seconds
                 if (_mExtra % (10 * 2) < 10) {
                     _diagram.redraw(screenSaverOffsetX, 10, 0, _display->getDisplayWidth() - 12, _display->getDisplayHeight() - 3, true);
+                    showText = false;
+                }
+                break;
+            case DiagramMode_t::Power:
+                if (_display_type == DisplayType_t::SH1106 && _display->getDisplayWidth() == 128 && _display->getDisplayHeight() == 64) {
+                    printPowerMode();
                     showText = false;
                 }
                 break;
