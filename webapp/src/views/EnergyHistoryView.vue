@@ -207,7 +207,7 @@
                         <BIconChevronLeft />
                     </button>
                     <ChartComponent
-                        v-if="!dailyEnergyLoading && dailyEnergyHistories.some((history) => history.data.length > 0)"
+                        v-if="dailyEnergyHistories.some((history) => history.data.length > 0)"
                         type="bar"
                         :data="dailyEnergyChartData"
                         :options="dailyEnergyChartOptions"
@@ -1103,18 +1103,23 @@ export default defineComponent({
             const loadId = ++this.dailyEnergyLoadId;
             const range = this.currentMonthDayRange();
             const targets = this.historyTargets().filter((target) => target.id !== 'total');
+            const histories: EnergyHistorySeries[] = targets.map((target) => ({
+                ...target,
+                data: [],
+            }));
+            this.dailyEnergyHistories = histories;
             this.dailyEnergyLoading = true;
 
-            const histories: EnergyHistorySeries[] = [];
             return this.runLimited(targets, 1, (target, index) => this.loadDailyEnergyTargetHistory(target, range)
                 .then((history) => {
-                    histories[index] = history;
-                }))
-                .then(() => {
-                    if (loadId === this.dailyEnergyLoadId) {
-                        this.dailyEnergyHistories = histories;
+                    if (loadId !== this.dailyEnergyLoadId) {
+                        return;
                     }
-                })
+
+                    const nextHistories = this.dailyEnergyHistories.slice();
+                    nextHistories[index] = history;
+                    this.dailyEnergyHistories = nextHistories;
+                }))
                 .catch(() => {
                     if (loadId === this.dailyEnergyLoadId) {
                         this.dailyEnergyHistories = [];
