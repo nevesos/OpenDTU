@@ -63,6 +63,7 @@ void WebApiEnergyHistoryFileClass::init(AsyncWebServer& server, Scheduler& sched
     server.on("/api/energy/history/file/list", HTTP_GET, static_cast<ArRequestHandlerFunction>(std::bind(&WebApiEnergyHistoryFileClass::onFileList, this, _1)));
     server.on("/api/energy/history/file/scan", HTTP_GET, static_cast<ArRequestHandlerFunction>(std::bind(&WebApiEnergyHistoryFileClass::onFileScan, this, _1)));
     server.on("/api/energy/history/file/recover", HTTP_POST, static_cast<ArRequestHandlerFunction>(std::bind(&WebApiEnergyHistoryFileClass::onFileRecover, this, _1)));
+    server.on("/api/energy/history/file/migrate-v2", HTTP_POST, static_cast<ArRequestHandlerFunction>(std::bind(&WebApiEnergyHistoryFileClass::onFileMigrateV2, this, _1)));
     server.on("/api/energy/history/file/download", HTTP_GET, static_cast<ArRequestHandlerFunction>(std::bind(&WebApiEnergyHistoryFileClass::onFileDownload, this, _1)));
     server.on("/api/energy/history/file/delete", HTTP_POST, static_cast<ArRequestHandlerFunction>(std::bind(&WebApiEnergyHistoryFileClass::onFileDelete, this, _1)));
     server.on("/api/energy/history/file/upload", HTTP_POST,
@@ -81,7 +82,7 @@ void WebApiEnergyHistoryFileClass::onFileList(AsyncWebServerRequest* request)
     JsonArray files = root["files"].to<JsonArray>();
 
     EnergyHistory.listFiles([&files](const EnergyHistoryClass::FileInfo& file) {
-        if (file.path.endsWith(".upload")) {
+        if (file.path.endsWith(".upload") || file.path.endsWith(".migrate") || file.path.endsWith(".backup")) {
             return;
         }
 
@@ -143,6 +144,44 @@ void WebApiEnergyHistoryFileClass::onFileRecover(AsyncWebServerRequest* request)
     root["code"] = WebApiError::GenericSuccess;
     root["file"] = path;
     writeScan(root["scan"].to<JsonObject>(), scan);
+    WebApi.sendJsonResponse(request, response, __FUNCTION__, __LINE__);
+}
+
+void WebApiEnergyHistoryFileClass::onFileMigrateV2(AsyncWebServerRequest* request)
+{
+    if (!WebApi.checkCredentials(request)) {
+        return;
+    }
+
+    String path;
+    if (!getManagedPath(request, path)) {
+        sendJsonMessage(request, 400, "warning", "Invalid energy history file path", WebApiError::GenericValueMissing);
+        return;
+    }
+
+    const bool overwrite = request->hasParam("overwrite") && request->getParam("overwrite")->value() == "1";
+    EnergyHistoryClass::MigrationResult migration;
+    if (!EnergyHistory.migrateFiveMinuteFileToV2(path, overwrite, migration)) {
+        if (migration.targetExisted && !overwrite) {
+            sendJsonMessage(request, 409, "warning", "Energy history V2 target already exists", WebApiError::GenericWriteFailed);
+            return;
+        }
+        sendJsonMessage(request, 500, "danger", "Energy history file migration failed", WebApiError::GenericWriteFailed);
+        return;
+    }
+
+    AsyncJsonResponse* response = new AsyncJsonResponse();
+    auto& root = response->getRoot();
+    root["type"] = "success";
+    root["message"] = "Energy history file migrated";
+    root["code"] = WebApiError::GenericSuccess;
+    root["source_file"] = migration.sourcePath;
+    root["target_file"] = migration.targetPath;
+    root["target_existed"] = migration.targetExisted;
+    root["record_count"] = migration.recordCount;
+    writeScan(root["source_scan"].to<JsonObject>(), migration.sourceScan);
+    writeScan(root["existing_target_scan"].to<JsonObject>(), migration.existingTargetScan);
+    writeScan(root["target_scan"].to<JsonObject>(), migration.targetScan);
     WebApi.sendJsonResponse(request, response, __FUNCTION__, __LINE__);
 }
 

@@ -8,6 +8,7 @@
 #include <esp_log.h>
 #endif
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <inttypes.h>
 #include <memory>
@@ -29,6 +30,7 @@ static constexpr const char* DayDirectory = "/energy/day";
 static constexpr const char* MonthDirectory = "/energy/month";
 static constexpr size_t FileReadBufferSize = 32;
 static constexpr uint16_t MaxRecordsPerAppendBlock = 4;
+static constexpr uint16_t MaxFiveMinuteMonthRecords = 31 * FiveMinuteSlotsPerDay;
 static constexpr size_t FiveMinuteDayFileBytes = FileHeaderSize + FiveMinuteSlotsPerDay * FiveMinuteRecordV2Size;
 static constexpr size_t RetentionReserveBytes = 64 * 1024;
 static constexpr size_t RetentionMinimumFreeBytes = FiveMinuteDayFileBytes + RetentionReserveBytes;
@@ -500,6 +502,64 @@ String baseName(const String& path)
     }
 
     return path.substring(lastSlash + 1);
+}
+
+bool parseFiveMinuteLegacyPath(const String& path, TargetType& targetType, uint64_t& serial, uint16_t& year, uint8_t& month)
+{
+    const String name = baseName(path);
+    if (!path.startsWith(String(FiveMinuteDirectory) + "/") || !name.endsWith(".eh5")) {
+        return false;
+    }
+
+    const int yearSeparator = name.lastIndexOf('_', static_cast<int>(name.length()) - 9);
+    const int monthSeparator = name.lastIndexOf('_');
+    if (yearSeparator <= 0 || monthSeparator <= yearSeparator || monthSeparator + 3 >= name.length()) {
+        return false;
+    }
+
+    const String targetName = name.substring(0, yearSeparator);
+    const String yearString = name.substring(yearSeparator + 1, monthSeparator);
+    const String monthString = name.substring(monthSeparator + 1, monthSeparator + 3);
+    if (yearString.length() != 4 || monthString.length() != 2 || name.substring(monthSeparator + 3) != ".eh5") {
+        return false;
+    }
+
+    for (uint16_t i = 0; i < yearString.length(); i++) {
+        if (yearString[i] < '0' || yearString[i] > '9') {
+            return false;
+        }
+    }
+    for (uint16_t i = 0; i < monthString.length(); i++) {
+        if (monthString[i] < '0' || monthString[i] > '9') {
+            return false;
+        }
+    }
+
+    if (targetName == "total") {
+        targetType = TargetType::Total;
+        serial = 0;
+    } else if (targetName.startsWith("inv_")) {
+        const String serialString = targetName.substring(4);
+        if (serialString.isEmpty()) {
+            return false;
+        }
+        for (uint16_t i = 0; i < serialString.length(); i++) {
+            if (serialString[i] < '0' || serialString[i] > '9') {
+                return false;
+            }
+        }
+        targetType = TargetType::Inverter;
+        serial = strtoull(serialString.c_str(), nullptr, 10);
+        if (serial == 0) {
+            return false;
+        }
+    } else {
+        return false;
+    }
+
+    year = static_cast<uint16_t>(yearString.toInt());
+    month = static_cast<uint8_t>(monthString.toInt());
+    return year >= 2000 && month >= 1 && month <= 12;
 }
 
 bool parseRetentionCandidateName(const String& path, uint16_t& year, uint8_t& month)
@@ -1961,6 +2021,138 @@ bool EnergyHistoryClass::recoverManagedFile(const String& path, ScanResult& resu
     }
 
     return recoverFinalBlock(normalizedPath.c_str(), header, result);
+}
+
+bool EnergyHistoryClass::migrateFiveMinuteFileToV2(const String& path, const bool overwrite, MigrationResult& result)
+{
+    result = MigrationResult();
+
+    String normalizedPath;
+    if (!isManagedFilePath(path, normalizedPath)) {
+        return false;
+    }
+
+    TargetType targetType = TargetType::Total;
+    uint64_t serial = 0;
+    uint16_t year = 0;
+    uint8_t month = 0;
+    if (!parseFiveMinuteLegacyPath(normalizedPath, targetType, serial, year, month)) {
+        return false;
+    }
+
+    FileHeader legacyHeader;
+    FileHeader targetHeader;
+    if (!makeFileHeader(FileType::FiveMinute, targetType, serial, year, month, legacyHeader)
+            || !makeFiveMinuteV2FileHeader(targetType, serial, year, month, targetHeader)) {
+        return false;
+    }
+
+    const String targetPath = makeFiveMinuteV2Path(targetType, serial, year, month);
+    if (targetPath.isEmpty()) {
+        return false;
+    }
+
+    result.sourcePath = normalizedPath;
+    result.targetPath = targetPath;
+    result.targetExisted = LittleFS.exists(targetPath);
+    if (result.targetExisted && !overwrite) {
+        return false;
+    }
+
+    std::unique_ptr<FiveMinuteRecord[]> records(new (std::nothrow) FiveMinuteRecord[MaxFiveMinuteMonthRecords]);
+    if (!records) {
+        return false;
+    }
+
+    uint16_t recordCount = 0;
+    if (!readFiveMinuteFile(normalizedPath.c_str(), legacyHeader, records.get(), MaxFiveMinuteMonthRecords, recordCount, result.sourceScan)) {
+        return false;
+    }
+
+    if (result.targetExisted) {
+        std::unique_ptr<FiveMinuteRecord[]> existingRecords(new (std::nothrow) FiveMinuteRecord[MaxFiveMinuteMonthRecords]);
+        if (!existingRecords) {
+            return false;
+        }
+
+        uint16_t existingRecordCount = 0;
+        if (!readFiveMinuteFileV2(targetPath.c_str(), targetHeader, existingRecords.get(), MaxFiveMinuteMonthRecords, existingRecordCount, result.existingTargetScan)) {
+            return false;
+        }
+
+        for (uint16_t i = 0; i < existingRecordCount; i++) {
+            if (!upsertFiveMinuteRecord(records.get(), MaxFiveMinuteMonthRecords, recordCount, existingRecords[i])) {
+                result.targetScan.skippedRecords++;
+            }
+        }
+    }
+
+    for (uint16_t i = 1; i < recordCount; i++) {
+        FiveMinuteRecord value = records[i];
+        uint16_t j = i;
+        while (j > 0
+                && (records[j - 1].day > value.day
+                        || (records[j - 1].day == value.day && records[j - 1].slot > value.slot))) {
+            records[j] = records[j - 1];
+            j--;
+        }
+        records[j] = value;
+    }
+
+    const String tempPath = targetPath + ".migrate";
+    const String backupPath = targetPath + ".backup";
+    LittleFS.remove(tempPath);
+
+    uint8_t encodedHeader[FileHeaderSize];
+    if (!encodeFileHeader(targetHeader, encodedHeader, sizeof(encodedHeader))) {
+        return false;
+    }
+
+    File tempFile = LittleFS.open(tempPath.c_str(), "w", false);
+    if (!tempFile) {
+        return false;
+    }
+
+    bool writeOk = writeFull(tempFile, encodedHeader, sizeof(encodedHeader));
+    uint8_t encodedRecord[FiveMinuteRecordV2Size];
+    for (uint16_t i = 0; writeOk && i < recordCount; i++) {
+        writeOk = encodeFiveMinuteRecordV2(records[i], encodedRecord, sizeof(encodedRecord))
+                && writeFull(tempFile, encodedRecord, sizeof(encodedRecord));
+    }
+    tempFile.flush();
+    tempFile.close();
+    if (!writeOk) {
+        LittleFS.remove(tempPath);
+        return false;
+    }
+
+    uint16_t validateRecordCount = 0;
+    if (!readFiveMinuteFileV2(tempPath.c_str(), targetHeader, nullptr, 0, validateRecordCount, result.targetScan)
+            || result.targetScan.invalidFinalBlock
+            || result.targetScan.canTruncateFinalBlock
+            || result.targetScan.validRecords != recordCount) {
+        LittleFS.remove(tempPath);
+        return false;
+    }
+
+    LittleFS.remove(backupPath);
+    if (result.targetExisted && !LittleFS.rename(targetPath, backupPath)) {
+        LittleFS.remove(tempPath);
+        return false;
+    }
+
+    if (!LittleFS.rename(tempPath, targetPath)) {
+        if (result.targetExisted) {
+            LittleFS.rename(backupPath, targetPath);
+        }
+        LittleFS.remove(tempPath);
+        return false;
+    }
+
+    LittleFS.remove(backupPath);
+    result.recordCount = recordCount;
+    markHistoryChanged(true, true);
+    return true;
 }
 
 bool EnergyHistoryClass::queryFiveMinuteDay(const TargetType targetType, const uint64_t serial, const uint16_t year, const uint8_t month, const uint8_t day, FiveMinuteRecord* records, const uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result)

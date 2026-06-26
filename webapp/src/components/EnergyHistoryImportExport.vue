@@ -151,6 +151,16 @@
                                     <BIconSearch />
                                 </button>
                                 <button
+                                    v-if="canMigrateFile(file)"
+                                    type="button"
+                                    class="btn btn-outline-success btn-sm ms-1"
+                                    :disabled="migratingFilePath === file.path"
+                                    :title="$t('energyhistory.MigrateV2')"
+                                    @click.stop="migrateFile(file)"
+                                >
+                                    {{ migratingFilePath === file.path ? $t('energyhistory.Migrating') : $t('energyhistory.MigrateV2Short') }}
+                                </button>
+                                <button
                                     type="button"
                                     class="btn btn-outline-danger btn-sm ms-1"
                                     :title="$t('energyhistory.Delete')"
@@ -437,6 +447,7 @@ export default defineComponent({
             selectedFileDeepScanPath: '',
             deepScanLoadingPath: '',
             recoveringFilePath: '',
+            migratingFilePath: '',
             selectedFileQuery: null as EnergyHistoryFileQuery | null,
             selectedFilePreviewDate: '',
             selectedFilePreviewLoading: false,
@@ -914,6 +925,54 @@ export default defineComponent({
                 })
                 .finally(() => {
                     this.recoveringFilePath = '';
+                });
+        },
+        canMigrateFile(file: EnergyHistoryFile): boolean {
+            return /\/energy\/5m\/(?:total|inv_\d+)_\d{4}_\d{2}\.eh5$/.test(file.path);
+        },
+        migrationTargetPath(file: EnergyHistoryFile): string {
+            return file.path.replace(/\.eh5$/, '.eh2');
+        },
+        migrateFile(file: EnergyHistoryFile) {
+            const targetPath = this.migrationTargetPath(file);
+            const targetExists = this.files.some((existing) => existing.path === targetPath);
+            if (targetExists && !window.confirm(String(this.$t('energyhistory.MigrateOverwriteConfirm', { file: file.path, target: targetPath })))) {
+                return;
+            }
+            if (!targetExists && !window.confirm(String(this.$t('energyhistory.MigrateConfirm', { file: file.path, target: targetPath })))) {
+                return;
+            }
+
+            this.migratingFilePath = file.path;
+            const params = new URLSearchParams();
+            params.set('file', file.path);
+            if (targetExists) {
+                params.set('overwrite', '1');
+            }
+
+            fetch('/api/energy/history/file/migrate-v2?' + params.toString(), {
+                method: 'POST',
+                headers: authHeader(),
+            })
+                .then((response) => handleResponse(response, this.$emitter, this.$router, true))
+                .then((data: { type?: string; message?: string; target_file?: string; record_count?: number }) => {
+                    this.alert = {
+                        show: true,
+                        type: data.type || 'success',
+                        message: String(this.$t('energyhistory.MigrateSuccess', { target: data.target_file || targetPath, count: data.record_count || 0 })),
+                    };
+                    this.$emit('changed');
+                    return this.loadFiles();
+                })
+                .catch(() => {
+                    this.alert = {
+                        show: true,
+                        type: 'danger',
+                        message: String(this.$t('energyhistory.MigrateFailed')),
+                    };
+                })
+                .finally(() => {
+                    this.migratingFilePath = '';
                 });
         },
         onUploadFileSelected(event: Event) {
