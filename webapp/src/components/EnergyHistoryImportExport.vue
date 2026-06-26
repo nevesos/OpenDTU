@@ -1198,6 +1198,10 @@ export default defineComponent({
             return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
         },
         calculateAveragePowerW(row: EnergyHistoryRow, rows: EnergyHistoryRow[], index: number): number {
+            if (this.selectedFilePreviewResolution !== '5m') {
+                return row.avg_power_w || 0;
+            }
+
             if (index === 0) {
                 return row.avg_power_w || 0;
             }
@@ -1221,10 +1225,6 @@ export default defineComponent({
                     slotDelta = (288 - prevRow.slot) + row.slot;
                 }
                 timeDeltaMinutes = slotDelta * 5;
-            } else if (this.selectedFilePreviewResolution === 'day' && row.day_of_year !== undefined && prevRow.day_of_year !== undefined) {
-                timeDeltaMinutes = (row.day_of_year - prevRow.day_of_year) * 24 * 60;
-            } else if (this.selectedFilePreviewResolution === 'month' && row.month !== undefined && prevRow.month !== undefined) {
-                timeDeltaMinutes = (row.month - prevRow.month) * 30 * 24 * 60;
             }
 
             if (timeDeltaMinutes <= 0) {

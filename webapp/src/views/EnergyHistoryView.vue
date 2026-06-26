@@ -1769,6 +1769,10 @@ export default defineComponent({
             return `${(value / 1024 / 1024).toFixed(1)} MiB`;
         },
         calculateAveragePowerW(row: EnergyHistoryRow, rows: EnergyHistoryRow[], index: number): number {
+            if (this.resolution !== '5m') {
+                return row.avg_power_w || 0;
+            }
+
             if (index === 0) {
                 return row.avg_power_w || 0;
             }
@@ -1823,10 +1827,6 @@ export default defineComponent({
                     slotDelta = (288 - (previousSlot % 288)) + (currentSlot % 288);
                 }
                 timeDeltaMinutes = slotDelta * 5;
-            } else if (this.resolution === 'day' && row.day_of_year !== undefined && prevRow.day_of_year !== undefined) {
-                timeDeltaMinutes = (row.day_of_year - prevRow.day_of_year) * 24 * 60;
-            } else if (this.resolution === 'month' && row.month !== undefined && prevRow.month !== undefined) {
-                timeDeltaMinutes = (row.month - prevRow.month) * 30 * 24 * 60;
             }
 
             if (timeDeltaMinutes <= 0) {
