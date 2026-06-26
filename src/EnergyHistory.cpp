@@ -2641,17 +2641,15 @@ bool EnergyHistoryClass::buildDayRecordsFromFiveMinuteMonth(const TargetType tar
         return false;
     }
 
-    auto mergeScan = [](ScanResult& target, const ScanResult& source) {
-        target.filesScanned += source.filesScanned;
-        target.validBlocks += source.validBlocks;
-        target.skippedBlocks += source.skippedBlocks;
-        target.validRecords += source.validRecords;
-        target.skippedRecords += source.skippedRecords;
-        target.fileSize += source.fileSize;
-        target.lastValidOffset += source.lastValidOffset;
-        target.invalidFinalBlock = target.invalidFinalBlock || source.invalidFinalBlock;
-        target.canTruncateFinalBlock = target.canTruncateFinalBlock || source.canTruncateFinalBlock;
-    };
+    std::unique_ptr<FiveMinuteRecord[]> monthRecords(new (std::nothrow) FiveMinuteRecord[MaxFiveMinuteMonthRecords]);
+    if (!monthRecords) {
+        return false;
+    }
+
+    uint16_t monthRecordCount = 0;
+    if (!queryFiveMinuteDay(targetType, serial, year, month, 0, monthRecords.get(), MaxFiveMinuteMonthRecords, monthRecordCount, result)) {
+        return false;
+    }
 
     bool ok = true;
     for (uint16_t i = 0; i < requestedDayCount; i++) {
@@ -2668,12 +2666,17 @@ bool EnergyHistoryClass::buildDayRecordsFromFiveMinuteMonth(const TargetType tar
 
         FiveMinuteRecord samples[FiveMinuteSlotsPerDay];
         uint16_t sampleCount = 0;
-        ScanResult dayScan;
-        if (!queryFiveMinuteDay(targetType, serial, year, recordMonth, recordDay, samples, FiveMinuteSlotsPerDay, sampleCount, dayScan)) {
-            ok = false;
-            continue;
+        for (uint16_t sampleIndex = 0; sampleIndex < monthRecordCount; sampleIndex++) {
+            if (monthRecords[sampleIndex].day != recordDay) {
+                continue;
+            }
+            if (sampleCount >= FiveMinuteSlotsPerDay) {
+                result.skippedRecords++;
+                break;
+            }
+            samples[sampleCount] = monthRecords[sampleIndex];
+            sampleCount++;
         }
-        mergeScan(result, dayScan);
 
         DayRecord record;
         if (buildDayRecordFromFiveMinuteSamples(year, recordMonth, recordDay, samples, sampleCount, record)) {
