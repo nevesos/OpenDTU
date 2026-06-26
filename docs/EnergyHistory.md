@@ -6,6 +6,18 @@ energy history feature. Data is stored on LittleFS, not in `config.json`.
 The feature is enabled only for builds that define `ENERGY_HISTORY_ENABLE`.
 The manual probe build additionally defines `ENERGY_HISTORY_MANUAL_PROBE`.
 
+Current PlatformIO environments with persistent Energy History enabled:
+
+```text
+generic_esp32s3_16mb_energy_history
+generic_esp32s3_usb_16mb_energy_history
+generic_esp32s3_usb_16mb_energy_history_psram
+generic_esp32s3_usb_16mb_energy_history_probe
+```
+
+These builds use `partitions_custom_16mb_energy_history.csv`, so switching from
+a normal build requires flashing with the 16-MB Energy-History partition layout.
+
 ## Directory Layout
 
 ```text
@@ -219,7 +231,9 @@ when the probe is executed.
 ## Runtime Behaviour
 
 `EnergyHistory.init(scheduler)` registers the five-minute loop task and the
-manual recovery task. The loop task runs every five minutes.
+manual recovery task. The loop task runs every five minutes. The recovery task
+is enabled only when recovery is requested, and runtime startup recovery remains
+disabled.
 
 Each runtime sample writes:
 
@@ -235,7 +249,9 @@ The first loop execution for a new local date finalizes the previously sampled
 local day for total and for every poll-enabled inverter. When the local month
 changed, it also finalizes the previous month. Failed finalizations are queued
 and retried in small batches on later loop executions so transient read/write
-failures do not permanently lose the aggregate.
+failures do not permanently lose the aggregate. Up to twelve pending
+finalizations are tracked, and at most two pending entries are retried per
+five-minute loop run.
 
 Runtime startup recovery is not executed automatically from the scheduler,
 because scanning all files can block other scheduler-driven services. Recovery
@@ -243,9 +259,10 @@ can be requested through the Web API. Before appending, a failed append attempts
 to recover a truncatable final block and then retries the append once.
 
 Changes to history data and managed files increment in-memory revision counters.
-`markDataChanged()` increments only the data revision. `markFilesChanged()`
-increments both data and file revisions, because file imports/deletes can change
-query results and the visible file list.
+Appending to an existing history file increments only the data revision. Creating
+a new history file, deleting retention candidates, file imports/deletes, manual
+per-file recovery, and append-time recovery increment both data and file
+revisions, because they can change query results and the visible file list.
 
 ## Backend Query Surface
 
@@ -306,10 +323,6 @@ scan every block; use the file scan endpoint for block/record validation.
 
 ```text
 files_scanned
-valid_blocks
-skipped_blocks
-valid_records
-skipped_records
 invalid_final_block_files
 truncatable_final_block_files
 bytes_scanned
@@ -425,6 +438,9 @@ files[].size
 
 Temporary upload files ending in `.upload` are filtered out of the list.
 
+The file list recursively enumerates `/energy/`, while status/recovery operate
+on the known `/energy/5m`, `/energy/day`, and `/energy/month` directories.
+
 Deep-scan one managed file:
 
 ```text
@@ -471,6 +487,11 @@ data, file imports, recovery, or deletes change the backend state. Inverter
 target IDs are built from the configured hexadecimal serial converted to the
 decimal `inv_<serial>` form used by the backend.
 
+The view also reads the managed file list and adds up to 32 additional inverter
+targets found in matching history files for the selected period. This allows
+imported or old inverter history to remain visible even when the inverter is no
+longer configured.
+
 Available query views:
 
 ```text
@@ -480,17 +501,21 @@ Year view     -> resolution=month, month range 1..12
 ```
 
 The chart overlays total power, per-inverter power, and cumulative total energy.
-For five-minute data the frontend can show either the data range from the first
-to the last present slot or a fixed full-day axis. Missing slots remain gaps.
+For five-minute data the frontend can show the data range from the first to the
+last present slot, a fixed full-day axis, or a seven-day axis. The seven-day
+axis loads seven day-scoped backend requests per target and shifts chart
+navigation in seven-day steps. Missing slots remain gaps. Automatic revision
+refresh is skipped while the five-minute chart is in seven-day mode to avoid
+unexpected reloads of the wider view.
 
 A secondary daily-energy chart is loaded for inverter targets for the currently
 selected month. It can render inverter energy stacked or as separate bars. The
-manual probe demo inverters are shown automatically for June 2099 when those
-targets are not present in the normal inverter list.
+chart has its own month navigation and can be opened to drill down into a day.
 
-The comparison area can load the available years from managed `total` files and
-render a month-by-month yearly comparison, a yearly total comparison, and a
-summary table.
+The comparison area can load the available years from managed `total` 5m, day,
+or month files and render a month-by-month yearly comparison, a yearly total
+comparison, and a summary table. Clicking a populated comparison month drills
+down into that month.
 
 The data-management panel can list files, select a file, preview the file
 through the normal history API, download, deep-scan, recover, delete, and upload
@@ -505,8 +530,13 @@ There is no fixed age-based retention for history files. Data is kept
 indefinitely unless LittleFS free space becomes low.
 
 Low-free-space cleanup runs only when a new history file is about to be
-created. It keeps enough free space for one per-target five-minute day file
-plus 32 KiB reserve before the new file header is written.
+created. It keeps enough free space for one five-minute day worth of append
+blocks plus 32 KiB reserve before the new file header is written. The threshold
+is based on one target's daily five-minute write volume:
+
+```text
+32-byte file header + 288 * (16-byte block header + 8-byte record) + 32 KiB
+```
 
 Cleanup is allowed to delete only old per-inverter five-minute files:
 
@@ -533,6 +563,8 @@ When reading:
 
 In the current runtime implementation, automatic startup recovery is disabled.
 Recovery runs only when requested through `POST /api/energy/history/recovery`,
-through per-file recovery, or as an append retry after an append failure. If
-only the final block is invalid or incomplete, recovery truncates the file to
-the last valid block boundary.
+through per-file recovery, or as an append retry after an append failure. The
+background recovery request scans the known history directories and tries to
+repair files whose headers decode successfully. If only the final block is
+invalid or incomplete, recovery truncates the file to the last valid block
+boundary.
