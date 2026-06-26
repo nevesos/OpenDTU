@@ -828,6 +828,74 @@ uint16_t averagePowerW(const uint32_t yieldWh, const uint32_t runtimeMin)
     return value > UINT16_MAX ? UINT16_MAX : static_cast<uint16_t>(value);
 }
 
+bool buildDayRecordFromFiveMinuteSamples(const uint16_t year, const uint8_t month, const uint8_t day, const FiveMinuteRecord* samples, const uint16_t sampleCount, DayRecord& record)
+{
+    const uint16_t doy = dayOfYear(year, month, day);
+    if (doy == 0 || samples == nullptr || sampleCount == 0) {
+        return false;
+    }
+
+    std::memset(&record, 0, sizeof(record));
+    record.dayOfYear = doy;
+    uint32_t maxYieldWh = 0;
+    uint32_t maxPowerW = 0;
+    uint32_t runtimeMin = 0;
+    uint16_t previousSlot = 0;
+    uint32_t previousYieldWh = 0;
+    bool previousValid = false;
+
+    for (uint16_t i = 0; i < sampleCount; i++) {
+        const FiveMinuteRecord& sample = samples[i];
+        if ((sample.flags & RecordFlagValid) == 0) {
+            continue;
+        }
+
+        record.sampleCount++;
+        if ((sample.flags & RecordFlagReachable) != 0) {
+            record.flags |= RecordFlagReachable;
+        }
+        if ((sample.flags & RecordFlagProducing) != 0) {
+            record.flags |= RecordFlagProducing;
+            runtimeMin += FiveMinuteIntervalSec / 60;
+        }
+        if ((sample.flags & RecordFlagEstimated) != 0) {
+            record.flags |= RecordFlagEstimated;
+        }
+
+        if (sample.yieldDayWh > maxYieldWh) {
+            maxYieldWh = sample.yieldDayWh;
+        }
+
+        if (previousValid) {
+            if (sample.yieldDayWh < previousYieldWh) {
+                record.flags |= RecordFlagDayResetDetected;
+            } else if (sample.slot > previousSlot && sample.yieldDayWh > previousYieldWh) {
+                const uint32_t deltaWh = sample.yieldDayWh - previousYieldWh;
+                const uint32_t deltaSec = static_cast<uint32_t>(sample.slot - previousSlot) * FiveMinuteIntervalSec;
+                const uint32_t powerW = (deltaWh * 3600U + deltaSec / 2U) / deltaSec;
+                if (powerW > maxPowerW) {
+                    maxPowerW = powerW;
+                }
+            }
+        }
+
+        previousSlot = sample.slot;
+        previousYieldWh = sample.yieldDayWh;
+        previousValid = true;
+    }
+
+    if (record.sampleCount == 0) {
+        return false;
+    }
+
+    record.yieldWh = maxYieldWh;
+    record.maxPowerW = saturateUint16(maxPowerW);
+    record.runtimeMin = saturateUint16(runtimeMin);
+    record.avgPowerW = averagePowerW(record.yieldWh, record.runtimeMin);
+    record.flags |= RecordFlagValid;
+    return true;
+}
+
 } // namespace
 
 EnergyHistoryClass EnergyHistory;
@@ -2521,19 +2589,21 @@ bool EnergyHistoryClass::buildDayRecordsFromFiveMinuteMonth(const TargetType tar
             break;
         }
 
+        FiveMinuteRecord samples[FiveMinuteSlotsPerDay];
+        uint16_t sampleCount = 0;
+        ScanResult dayScan;
+        if (!queryFiveMinuteDay(targetType, serial, year, recordMonth, recordDay, samples, FiveMinuteSlotsPerDay, sampleCount, dayScan)) {
+            ok = false;
+            continue;
+        }
+        mergeScan(result, dayScan);
+
         DayRecord record;
-        if (buildDayRecordFromFiveMinute(targetType, serial, year, recordMonth, recordDay, record)) {
+        if (buildDayRecordFromFiveMinuteSamples(year, recordMonth, recordDay, samples, sampleCount, record)) {
             records[recordCount] = record;
             recordCount++;
         } else {
             ok = false;
-        }
-
-        FiveMinuteRecord samples[FiveMinuteSlotsPerDay];
-        uint16_t sampleCount = 0;
-        ScanResult dayScan;
-        if (queryFiveMinuteDay(targetType, serial, year, recordMonth, recordDay, samples, FiveMinuteSlotsPerDay, sampleCount, dayScan)) {
-            mergeScan(result, dayScan);
         }
     }
 
@@ -2542,77 +2612,14 @@ bool EnergyHistoryClass::buildDayRecordsFromFiveMinuteMonth(const TargetType tar
 
 bool EnergyHistoryClass::buildDayRecordFromFiveMinute(const TargetType targetType, const uint64_t serial, const uint16_t year, const uint8_t month, const uint8_t day, DayRecord& record)
 {
-    const uint16_t doy = dayOfYear(year, month, day);
-    if (doy == 0) {
-        return false;
-    }
-
     FiveMinuteRecord samples[FiveMinuteSlotsPerDay];
     uint16_t sampleCount = 0;
     ScanResult scan;
-    if (!queryFiveMinuteDay(targetType, serial, year, month, day, samples, FiveMinuteSlotsPerDay, sampleCount, scan) || sampleCount == 0) {
+    if (!queryFiveMinuteDay(targetType, serial, year, month, day, samples, FiveMinuteSlotsPerDay, sampleCount, scan)) {
         return false;
     }
 
-    std::memset(&record, 0, sizeof(record));
-    record.dayOfYear = doy;
-    uint32_t maxYieldWh = 0;
-    uint32_t maxPowerW = 0;
-    uint32_t runtimeMin = 0;
-    uint16_t previousSlot = 0;
-    uint32_t previousYieldWh = 0;
-    bool previousValid = false;
-
-    for (uint16_t i = 0; i < sampleCount; i++) {
-        const FiveMinuteRecord& sample = samples[i];
-        if ((sample.flags & RecordFlagValid) == 0) {
-            continue;
-        }
-
-        record.sampleCount++;
-        if ((sample.flags & RecordFlagReachable) != 0) {
-            record.flags |= RecordFlagReachable;
-        }
-        if ((sample.flags & RecordFlagProducing) != 0) {
-            record.flags |= RecordFlagProducing;
-            runtimeMin += FiveMinuteIntervalSec / 60;
-        }
-        if ((sample.flags & RecordFlagEstimated) != 0) {
-            record.flags |= RecordFlagEstimated;
-        }
-
-        if (sample.yieldDayWh > maxYieldWh) {
-            maxYieldWh = sample.yieldDayWh;
-        }
-
-        if (previousValid) {
-            if (sample.yieldDayWh < previousYieldWh) {
-                record.flags |= RecordFlagDayResetDetected;
-            } else if (sample.slot > previousSlot && sample.yieldDayWh > previousYieldWh) {
-                const uint32_t deltaWh = sample.yieldDayWh - previousYieldWh;
-                const uint32_t deltaSec = static_cast<uint32_t>(sample.slot - previousSlot) * FiveMinuteIntervalSec;
-                const uint32_t powerW = (deltaWh * 3600U + deltaSec / 2U) / deltaSec;
-                if (powerW > maxPowerW) {
-                    maxPowerW = powerW;
-                }
-            }
-        }
-
-        previousSlot = sample.slot;
-        previousYieldWh = sample.yieldDayWh;
-        previousValid = true;
-    }
-
-    if (record.sampleCount == 0) {
-        return false;
-    }
-
-    record.yieldWh = maxYieldWh;
-    record.maxPowerW = saturateUint16(maxPowerW);
-    record.runtimeMin = saturateUint16(runtimeMin);
-    record.avgPowerW = averagePowerW(record.yieldWh, record.runtimeMin);
-    record.flags |= RecordFlagValid;
-    return true;
+    return buildDayRecordFromFiveMinuteSamples(year, month, day, samples, sampleCount, record);
 }
 
 bool EnergyHistoryClass::buildMonthRecordFromDay(const TargetType targetType, const uint64_t serial, const uint16_t year, const uint8_t month, MonthRecord& record)

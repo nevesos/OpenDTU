@@ -560,13 +560,13 @@ export default defineComponent({
     methods: {
         toggleDataManagement() {
             this.dataManagementExpanded = !this.dataManagementExpanded;
-            if (this.dataManagementExpanded && !this.dataManagementFilesLoaded && !this.loading) {
+            if (this.dataManagementExpanded && !this.loading) {
                 this.loadFiles();
             }
         },
         loadFiles(): Promise<void> {
             this.loading = true;
-            return fetch('/api/energy/history/file/list', { headers: authHeader() })
+            return fetch('/api/energy/history/file/list', { headers: authHeader(), cache: 'no-store' })
                 .then((response) => handleResponse(response, this.$emitter, this.$router))
                 .then((data: EnergyHistoryFileListResponse) => {
                     this.dataManagementFilesLoaded = true;
@@ -679,7 +679,7 @@ export default defineComponent({
             params.set('to', String(query.to || 12));
 
             this.selectedFilePreviewLoading = true;
-            return fetch('/api/energy/history?' + params.toString(), { headers: authHeader() })
+            return fetch('/api/energy/history?' + params.toString(), { headers: authHeader(), cache: 'no-store' })
                 .then((response) => handleResponse(response, this.$emitter, this.$router, true))
                 .then((data: EnergyHistoryResponse) => {
                     this.selectedFileRows = data.data || [];
@@ -727,7 +727,7 @@ export default defineComponent({
             params.set('resolution', '5m');
             params.set('date', date);
 
-            return fetch('/api/energy/history?' + params.toString(), { headers: authHeader() })
+            return fetch('/api/energy/history?' + params.toString(), { headers: authHeader(), cache: 'no-store' })
                 .then((response) => response.json())
                 .then((data: EnergyHistoryResponse) => data)
                 .catch(() => ({ data: [] }));
