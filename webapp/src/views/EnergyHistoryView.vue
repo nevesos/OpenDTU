@@ -1035,6 +1035,22 @@ export default defineComponent({
                     }
                 });
         },
+        runLimited<T>(items: T[], limit: number, worker: (item: T, index: number) => Promise<void>): Promise<void> {
+            const workerCount = Math.min(Math.max(limit, 1), items.length);
+            let nextIndex = 0;
+            const runners = Array.from({ length: workerCount }, () => {
+                const runNext = (): Promise<void> => {
+                    const index = nextIndex++;
+                    if (index >= items.length) {
+                        return Promise.resolve();
+                    }
+                    return worker(items[index]!, index).then(runNext);
+                };
+                return runNext();
+            });
+
+            return Promise.all(runners).then(() => undefined);
+        },
         loadHistory(loadDailyEnergy = true) {
             const loadId = ++this.historyLoadId;
             this.historyLoading = true;
@@ -1050,19 +1066,21 @@ export default defineComponent({
                 this.dailyEnergyLoading = true;
             }
 
-            const requests = targets.map((target, index) => this.loadTargetHistory(target)
+            const historyRequestLimit = this.resolution === '5m' ? 2 : 1;
+            const loadRequest = (target: EnergyHistorySeries, index: number) => this.loadTargetHistory(target)
                 .then((histories) => {
                     if (loadId !== this.historyLoadId) {
-                        return histories;
+                        return;
                     }
 
                     const nextHistories = this.histories.slice();
                     nextHistories[index] = histories;
                     this.histories = nextHistories;
-                    return histories;
-                }));
+                });
 
-            Promise.all(requests)
+            const request = this.runLimited(targets, historyRequestLimit, loadRequest);
+
+            request
                 .then(() => {
                     if (loadId !== this.historyLoadId) {
                         return;
@@ -1073,7 +1091,7 @@ export default defineComponent({
                     }
                 });
 
-            return Promise.all(requests)
+            return request
                 .then(() => undefined)
                 .finally(() => {
                     if (loadId === this.historyLoadId) {
@@ -1087,8 +1105,12 @@ export default defineComponent({
             const targets = this.historyTargets().filter((target) => target.id !== 'total');
             this.dailyEnergyLoading = true;
 
-            return Promise.all(targets.map((target) => this.loadDailyEnergyTargetHistory(target, range)))
-                .then((histories) => {
+            const histories: EnergyHistorySeries[] = [];
+            return this.runLimited(targets, 1, (target, index) => this.loadDailyEnergyTargetHistory(target, range)
+                .then((history) => {
+                    histories[index] = history;
+                }))
+                .then(() => {
                     if (loadId === this.dailyEnergyLoadId) {
                         this.dailyEnergyHistories = histories;
                     }
@@ -1227,7 +1249,8 @@ export default defineComponent({
         },
         loadSevenDayTargetHistory(target: EnergyHistorySeries): Promise<EnergyHistorySeries> {
             const dates = this.sevenDayAxisDateValues();
-            const requests = dates.map((date, dayIndex) => {
+            const rowsByDay = dates.map(() => [] as EnergyHistoryRow[]);
+            const loadDay = (date: string, dayIndex: number) => {
                 const params = new URLSearchParams();
                 params.set('resolution', '5m');
                 params.set('target', target.id);
@@ -1235,16 +1258,20 @@ export default defineComponent({
 
                 return fetch('/api/energy/history?' + params.toString(), { headers: authHeader() })
                     .then((response) => handleResponse(response, this.$emitter, this.$router, true))
-                    .then((data: EnergyHistoryResponse) => (data.data || []).map((row) => ({
-                        ...row,
-                        chart_slot: row.slot !== undefined ? dayIndex * 288 + row.slot : undefined,
-                        chart_date: date,
-                    } as EnergyHistoryRow)))
-                    .catch(() => [] as EnergyHistoryRow[]);
-            });
+                    .then((data: EnergyHistoryResponse) => {
+                        rowsByDay[dayIndex] = (data.data || []).map((row) => ({
+                            ...row,
+                            chart_slot: row.slot !== undefined ? dayIndex * 288 + row.slot : undefined,
+                            chart_date: date,
+                        } as EnergyHistoryRow));
+                    })
+                    .catch(() => {
+                        rowsByDay[dayIndex] = [];
+                    });
+            };
 
-            return Promise.all(requests)
-                .then((rowsByDay) => ({
+            return this.runLimited(dates, 1, loadDay)
+                .then(() => ({
                     ...target,
                     data: rowsByDay.flat(),
                     metadata: {
@@ -1310,7 +1337,7 @@ export default defineComponent({
                 .then((data: EnergyHistoryFileListResponse) => {
                     const years = new Set<number>();
                     (data.files || []).forEach((file) => {
-                        const match = file.path.match(/^\/energy\/(?:month\/total_(\d{4})\.ehm|day\/total_(\d{4})\.ehd|5m\/total_(\d{4})_\d{2}\.(?:eh5|eh2))$/);
+                        const match = file.path.match(/^\/energy\/(?:month\/total_(\d{4})\.ehm|day\/total_(\d{4})\.ehd|5m\/total_(\d{4})_\d{2}\.eh2)$/);
                         if (!match) {
                             return;
                         }
@@ -1410,7 +1437,7 @@ export default defineComponent({
                     monthKeys.add(`${date.getFullYear()}_${String(date.getMonth() + 1).padStart(2, '0')}`);
                 });
                 monthKeys.forEach((monthKey) => {
-                    patterns.push(new RegExp(`^/energy/5m/(inv_\\d+)_${monthKey}\\.(?:eh5|eh2)$`));
+                    patterns.push(new RegExp(`^/energy/5m/(inv_\\d+)_${monthKey}\\.eh2$`));
                 });
             } else if (this.query.view === 'month') {
                 const date = this.parseMonthInput(this.query.month);

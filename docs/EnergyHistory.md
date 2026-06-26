@@ -285,7 +285,7 @@ The firmware exposes narrow backend methods for future Web API use:
 ```text
 lightweight status scan across energy files
 revision counters for UI polling
-5m query for one target and one local day, merged from EH01 `.eh5` and EH02 `.eh2` files
+5m query for one target and one local day from EH02 `.eh2` files
 day query for one target and a day-of-year range
 month query for one target and a month range
 ```
@@ -294,9 +294,9 @@ The five-minute query is day-scoped by design so callers cannot accidentally
 request an unbounded monthly dump.
 
 Queries return deduplicated logical records. If multiple valid records exist for
-the same key, the last valid record wins. For five-minute data, legacy `.eh5` is
-read first and compact `.eh2` is read afterwards, so `.eh2` wins for duplicate
-slots.
+the same key, the last valid record wins. Five-minute visualization uses compact
+`.eh2` files only; legacy `.eh5` files are kept only for migration, download, or
+manual deletion.
 
 Day queries first read persisted day records. Missing requested days are rebuilt
 from the corresponding five-minute month file when possible, returned to the
