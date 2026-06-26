@@ -9,9 +9,11 @@
 namespace EnergyHistoryFormat {
 
 static constexpr char FileMagic[4] = { 'E', 'H', '0', '1' };
+static constexpr char FileMagicV2[4] = { 'E', 'H', '0', '2' };
 static constexpr char BlockMagic[4] = { 'E', 'H', 'B', '1' };
 
 static constexpr uint8_t Version = 1;
+static constexpr uint8_t VersionV2 = 2;
 static constexpr uint8_t FileHeaderSize = 32;
 static constexpr uint8_t BlockHeaderSize = 16;
 
@@ -89,6 +91,7 @@ struct MonthRecord {
 };
 
 static constexpr uint8_t FiveMinuteRecordSize = 8;
+static constexpr uint8_t FiveMinuteRecordV2Size = 10;
 static constexpr uint8_t DayRecordSize = 16;
 static constexpr uint8_t MonthRecordSize = 16;
 static constexpr uint16_t FiveMinuteIntervalSec = 5 * 60;
@@ -187,7 +190,9 @@ private:
     void recoveryLoop();
     void loop();
     bool makeFileHeader(EnergyHistoryFormat::FileType fileType, EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, uint8_t month, EnergyHistoryFormat::FileHeader& header);
+    bool makeFiveMinuteV2FileHeader(EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, uint8_t month, EnergyHistoryFormat::FileHeader& header);
     String makeFiveMinutePath(EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, uint8_t month);
+    String makeFiveMinuteV2Path(EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, uint8_t month);
     String makeDayPath(EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year);
     String makeMonthPath(EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year);
     bool writeFiveMinute(EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, uint8_t month, const EnergyHistoryFormat::FiveMinuteRecord* records, uint16_t recordCount, uint16_t blockIndex);
@@ -198,6 +203,7 @@ private:
     bool readMonth(EnergyHistoryFormat::TargetType targetType, uint64_t serial, uint16_t year, EnergyHistoryFormat::MonthRecord* records, uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result);
     bool appendBlock(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, uint16_t blockIndex, uint16_t startKey, const uint8_t* payload, uint16_t payloadSize, uint16_t recordCount);
     bool appendFiveMinuteBlock(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, const EnergyHistoryFormat::FiveMinuteRecord* records, uint16_t recordCount, uint16_t blockIndex);
+    bool appendFiveMinuteRecordV2(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, const EnergyHistoryFormat::FiveMinuteRecord* records, uint16_t recordCount);
     bool appendDayBlock(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, const EnergyHistoryFormat::DayRecord* records, uint16_t recordCount, uint16_t blockIndex);
     bool appendMonthBlock(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, const EnergyHistoryFormat::MonthRecord* records, uint16_t recordCount, uint16_t blockIndex);
     bool recoverFinalBlock(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, ScanResult& result);
@@ -208,9 +214,11 @@ private:
     bool listFilesInDirectory(const char* directoryPath, const std::function<void(const FileInfo&)>& visitor);
     bool scanFile(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, ScanResult& result);
     bool scanFiveMinuteFile(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, ScanResult& result);
+    bool scanFiveMinuteFileV2(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, ScanResult& result);
     template <typename Record>
     bool readRecordFile(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, EnergyHistoryFormat::FileType fileType, uint8_t recordSize, Record* records, uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result, bool (*decodeRecord)(const uint8_t*, size_t, Record&), bool (*upsertRecord)(Record*, uint16_t, uint16_t&, const Record&));
     bool readFiveMinuteFile(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, EnergyHistoryFormat::FiveMinuteRecord* records, uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result);
+    bool readFiveMinuteFileV2(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, EnergyHistoryFormat::FiveMinuteRecord* records, uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result);
     bool readDayFile(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, EnergyHistoryFormat::DayRecord* records, uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result);
     bool readMonthFile(const char* path, const EnergyHistoryFormat::FileHeader& expectedHeader, EnergyHistoryFormat::MonthRecord* records, uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result);
     bool runManualPersistenceProbe(ManualProbeResult& result);

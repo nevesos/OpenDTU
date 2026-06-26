@@ -1,6 +1,6 @@
 # Persistent Energy History
 
-This document defines the first on-flash format for the fork-only persistent
+This document defines the persistent on-flash formats for the fork-only persistent
 energy history feature. Data is stored on LittleFS, not in `config.json`.
 
 The feature is enabled only for builds that define `ENERGY_HISTORY_ENABLE`.
@@ -41,7 +41,9 @@ names, so history survives renames.
 Five-minute data is stored in monthly files:
 
 ```text
-/energy/5m/total_YYYY_MM.eh5
+/energy/5m/total_YYYY_MM.eh2       current compact 5m format
+/energy/5m/inv_<serial>_YYYY_MM.eh2
+/energy/5m/total_YYYY_MM.eh5       legacy block format, still readable
 /energy/5m/inv_<serial>_YYYY_MM.eh5
 ```
 
@@ -69,11 +71,11 @@ struct layout must not be written directly because padding is compiler-specific.
 Fixed size: 32 bytes.
 
 ```text
-magic        4 bytes   "EH01"
+magic        4 bytes   "EH01" for legacy/block files, "EH02" for compact 5m files
 fileType     uint8     1=5m, 2=day, 3=month
-version      uint8     1
+version      uint8     1 for EH01, 2 for EH02
 headerSize   uint8     32
-recordSize   uint8     depends on fileType
+recordSize   uint8     depends on fileType and version
 year         uint16
 month        uint8     1..12 for 5m, 0 for day/month
 targetType   uint8     0=total, 1=inverter
@@ -106,15 +108,26 @@ month: month, 1..12
 
 CRC is calculated over the block payload only.
 
-## Five-Minute Record
+## Five-Minute Records
 
-Size: 8 bytes.
+EH01 legacy block record size: 8 bytes.
 
 ```text
 day          uint8     1..31
 slot         uint16    0..287, local five-minute slot in the day
 yieldDayWh   uint32    daily yield in Wh
 flags        uint8
+```
+
+EH02 compact record size: 10 bytes. It stores the same first 8 bytes followed
+by a CRC16-CCITT over those 8 bytes.
+
+```text
+day          uint8     1..31
+slot         uint16    0..287, local five-minute slot in the day
+yieldDayWh   uint32    daily yield in Wh
+flags        uint8
+crc16        uint16    CRC16-CCITT over day..flags
 ```
 
 `slot` is calculated as:
@@ -192,9 +205,10 @@ Persistence interval:
 5 minutes, and additionally at day/month boundaries
 ```
 
-Five-minute data should be appended in small blocks. The API must deduplicate by
-`day + slot` when repeated writes occur; the last valid record wins. This avoids
-in-place rewrites and keeps flash wear low.
+New five-minute data is appended as EH02 compact records without per-sample
+block headers. Legacy EH01 five-minute block files remain readable. The API
+deduplicates by `day + slot` when repeated writes occur; the last valid record
+wins. This avoids in-place rewrites and keeps flash wear low.
 
 Runtime five-minute samples are written only during the configured day period
 from `SunPosition`. If sunrise/sunset calculation is unavailable, sampling
@@ -271,7 +285,7 @@ The firmware exposes narrow backend methods for future Web API use:
 ```text
 lightweight status scan across energy files
 revision counters for UI polling
-5m query for one target and one local day
+5m query for one target and one local day, merged from EH01 `.eh5` and EH02 `.eh2` files
 day query for one target and a day-of-year range
 month query for one target and a month range
 ```
@@ -280,7 +294,9 @@ The five-minute query is day-scoped by design so callers cannot accidentally
 request an unbounded monthly dump.
 
 Queries return deduplicated logical records. If multiple valid records exist for
-the same key, the last valid record wins.
+the same key, the last valid record wins. For five-minute data, legacy `.eh5` is
+read first and compact `.eh2` is read afterwards, so `.eh2` wins for duplicate
+slots.
 
 Day queries first read persisted day records. Missing requested days are rebuilt
 from the corresponding five-minute month file when possible, returned to the
@@ -444,32 +460,32 @@ on the known `/energy/5m`, `/energy/day`, and `/energy/month` directories.
 Deep-scan one managed file:
 
 ```text
-GET /api/energy/history/file/scan?file=/energy/5m/total_YYYY_MM.eh5
+GET /api/energy/history/file/scan?file=/energy/5m/total_YYYY_MM.eh2
 ```
 
 Recover one managed file by truncating a corrupt or incomplete final block when
 possible:
 
 ```text
-POST /api/energy/history/file/recover?file=/energy/5m/total_YYYY_MM.eh5
+POST /api/energy/history/file/recover?file=/energy/5m/total_YYYY_MM.eh2
 ```
 
 Download one managed file:
 
 ```text
-GET /api/energy/history/file/download?file=/energy/5m/total_YYYY_MM.eh5
+GET /api/energy/history/file/download?file=/energy/5m/total_YYYY_MM.eh2
 ```
 
 Delete one managed file:
 
 ```text
-POST /api/energy/history/file/delete?file=/energy/5m/total_YYYY_MM.eh5
+POST /api/energy/history/file/delete?file=/energy/5m/total_YYYY_MM.eh2
 ```
 
 Upload and overwrite one managed file:
 
 ```text
-POST /api/energy/history/file/upload?file=/energy/5m/total_YYYY_MM.eh5
+POST /api/energy/history/file/upload?file=/energy/5m/total_YYYY_MM.eh2
 ```
 
 Uploads are first written to `<target>.upload` and then renamed over the target
@@ -530,24 +546,25 @@ There is no fixed age-based retention for history files. Data is kept
 indefinitely unless LittleFS free space becomes low.
 
 Low-free-space cleanup runs only when a new history file is about to be
-created. It keeps enough free space for one five-minute day worth of append
-blocks plus 32 KiB reserve before the new file header is written. The threshold
-is based on one target's daily five-minute write volume:
+created. It keeps enough free space for one compact EH02 five-minute day plus
+64 KiB reserve before the new file header is written. The threshold is based on
+one target's daily five-minute write volume:
 
 ```text
-32-byte file header + 288 * (16-byte block header + 8-byte record) + 32 KiB
+32-byte file header + 288 * 10-byte compact records + 64 KiB
 ```
 
 Cleanup is allowed to delete only old per-inverter five-minute files:
 
 ```text
+/energy/5m/inv_<serial>_YYYY_MM.eh2
 /energy/5m/inv_<serial>_YYYY_MM.eh5
 ```
 
 Cleanup rules:
 
 1. Delete the oldest per-inverter five-minute files first.
-2. Do not delete `/energy/5m/total_YYYY_MM.eh5`.
+2. Do not delete `/energy/5m/total_YYYY_MM.eh2` or `/energy/5m/total_YYYY_MM.eh5`.
 3. Do not delete day or month aggregate files.
 4. Ignore unrecognized file names and unrelated LittleFS files.
 
@@ -556,8 +573,8 @@ Cleanup rules:
 When reading:
 
 1. Validate file header magic, version, type, size fields, and header CRC.
-2. Validate each block header.
-3. Validate payload CRC.
+2. Validate each block header for EH01 files.
+3. Validate payload CRC for EH01 blocks or record CRC16 for EH02 records.
 4. Ignore invalid blocks.
 5. Report skipped blocks through API status/warnings.
 
@@ -565,6 +582,6 @@ In the current runtime implementation, automatic startup recovery is disabled.
 Recovery runs only when requested through `POST /api/energy/history/recovery`,
 through per-file recovery, or as an append retry after an append failure. The
 background recovery request scans the known history directories and tries to
-repair files whose headers decode successfully. If only the final block is
-invalid or incomplete, recovery truncates the file to the last valid block
-boundary.
+repair files whose headers decode successfully. If only the final EH01 block
+or final EH02 record is invalid or incomplete, recovery truncates the file to
+the last valid boundary.

@@ -1310,7 +1310,7 @@ export default defineComponent({
                 .then((data: EnergyHistoryFileListResponse) => {
                     const years = new Set<number>();
                     (data.files || []).forEach((file) => {
-                        const match = file.path.match(/^\/energy\/(?:month\/total_(\d{4})\.ehm|day\/total_(\d{4})\.ehd|5m\/total_(\d{4})_\d{2}\.eh5)$/);
+                        const match = file.path.match(/^\/energy\/(?:month\/total_(\d{4})\.ehm|day\/total_(\d{4})\.ehd|5m\/total_(\d{4})_\d{2}\.(?:eh5|eh2))$/);
                         if (!match) {
                             return;
                         }
@@ -1410,7 +1410,7 @@ export default defineComponent({
                     monthKeys.add(`${date.getFullYear()}_${String(date.getMonth() + 1).padStart(2, '0')}`);
                 });
                 monthKeys.forEach((monthKey) => {
-                    patterns.push(new RegExp(`^/energy/5m/(inv_\\d+)_${monthKey}\\.eh5$`));
+                    patterns.push(new RegExp(`^/energy/5m/(inv_\\d+)_${monthKey}\\.(?:eh5|eh2)$`));
                 });
             } else if (this.query.view === 'month') {
                 const date = this.parseMonthInput(this.query.month);

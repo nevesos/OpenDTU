@@ -25,9 +25,9 @@ static constexpr uint16_t DemoLastSlot = 216;
 static constexpr const char* ProbeTag = "EnergyHistoryProbe";
 
 template <typename Scan>
-bool verifyScan(const Scan& scan, const uint32_t validRecords)
+bool verifyScan(const Scan& scan, const uint32_t validBlocks, const uint32_t validRecords)
 {
-    return scan.validBlocks == 2
+    return scan.validBlocks == validBlocks
             && scan.validRecords == validRecords
             && scan.skippedBlocks == 0
             && scan.skippedRecords == 0
@@ -119,17 +119,19 @@ bool EnergyHistoryClass::writeDemoData()
     }
 
     const auto resetTarget = [this](const TargetType targetType, const uint64_t serial) {
-        const String fiveMinutePath = makeFiveMinutePath(targetType, serial, DemoYear, DemoMonth);
+        const String fiveMinutePath = makeFiveMinuteV2Path(targetType, serial, DemoYear, DemoMonth);
+        const String legacyFiveMinutePath = makeFiveMinutePath(targetType, serial, DemoYear, DemoMonth);
         const String dayPath = makeDayPath(targetType, serial, DemoYear);
         const String monthPath = makeMonthPath(targetType, serial, DemoYear);
-        if (fiveMinutePath.isEmpty() || dayPath.isEmpty() || monthPath.isEmpty()) {
+        if (fiveMinutePath.isEmpty() || legacyFiveMinutePath.isEmpty() || dayPath.isEmpty() || monthPath.isEmpty()) {
             return false;
         }
 
         LittleFS.remove(fiveMinutePath);
+        LittleFS.remove(legacyFiveMinutePath);
         LittleFS.remove(dayPath);
         LittleFS.remove(monthPath);
-        return pathIsAbsent(fiveMinutePath) && pathIsAbsent(dayPath) && pathIsAbsent(monthPath);
+        return pathIsAbsent(fiveMinutePath) && pathIsAbsent(legacyFiveMinutePath) && pathIsAbsent(dayPath) && pathIsAbsent(monthPath);
     };
 
     const bool resetOk = resetTarget(TargetType::Total, 0)
@@ -189,10 +191,11 @@ bool EnergyHistoryClass::runManualPersistenceProbe(ManualProbeResult& result)
     result = ManualProbeResult();
     ESP_LOGI(ProbeTag, "probe start");
 
-    const String fiveMinutePath = makeFiveMinutePath(TargetType::Inverter, ManualProbeSerial, ManualProbeYear, ManualProbeMonth);
+    const String fiveMinutePath = makeFiveMinuteV2Path(TargetType::Inverter, ManualProbeSerial, ManualProbeYear, ManualProbeMonth);
+    const String legacyFiveMinutePath = makeFiveMinutePath(TargetType::Inverter, ManualProbeSerial, ManualProbeYear, ManualProbeMonth);
     const String dayPath = makeDayPath(TargetType::Inverter, ManualProbeSerial, ManualProbeYear);
     const String monthPath = makeMonthPath(TargetType::Inverter, ManualProbeSerial, ManualProbeYear);
-    if (fiveMinutePath.isEmpty() || dayPath.isEmpty() || monthPath.isEmpty()) {
+    if (fiveMinutePath.isEmpty() || legacyFiveMinutePath.isEmpty() || dayPath.isEmpty() || monthPath.isEmpty()) {
         ESP_LOGE(ProbeTag, "path creation failed");
         return false;
     }
@@ -224,6 +227,7 @@ bool EnergyHistoryClass::runManualPersistenceProbe(ManualProbeResult& result)
     const bool dayDirOk = ensureProbeDirectory("/energy/day");
     const bool monthDirOk = ensureProbeDirectory("/energy/month");
     const bool truncateFiveMinuteOk = truncateProbeFile(fiveMinutePath);
+    const bool truncateLegacyFiveMinuteOk = truncateProbeFile(legacyFiveMinutePath);
     const bool truncateDayOk = truncateProbeFile(dayPath);
     const bool truncateMonthOk = truncateProbeFile(monthPath);
     const bool cleanupBeforeWriteOk = energyDirOk
@@ -231,12 +235,14 @@ bool EnergyHistoryClass::runManualPersistenceProbe(ManualProbeResult& result)
             && dayDirOk
             && monthDirOk
             && truncateFiveMinuteOk
+            && truncateLegacyFiveMinuteOk
             && truncateDayOk
             && truncateMonthOk;
-    ESP_LOGI(ProbeTag, "setup: dirs=%u/%u/%u/%u truncate=%u/%u/%u", energyDirOk, fiveMinuteDirOk, dayDirOk, monthDirOk, truncateFiveMinuteOk, truncateDayOk, truncateMonthOk);
+    ESP_LOGI(ProbeTag, "setup: dirs=%u/%u/%u/%u truncate=%u/%u/%u/%u", energyDirOk, fiveMinuteDirOk, dayDirOk, monthDirOk, truncateFiveMinuteOk, truncateLegacyFiveMinuteOk, truncateDayOk, truncateMonthOk);
     if (!cleanupBeforeWriteOk) {
         ESP_LOGE(ProbeTag, "setup failed");
         LittleFS.remove(fiveMinutePath);
+        LittleFS.remove(legacyFiveMinutePath);
         LittleFS.remove(dayPath);
         LittleFS.remove(monthPath);
         return false;
@@ -275,7 +281,7 @@ bool EnergyHistoryClass::runManualPersistenceProbe(ManualProbeResult& result)
     result.fiveMinuteOk = fiveMinuteWriteOk
             && fiveMinuteReadOk
             && result.fiveMinuteRecordsRead == 2
-            && verifyScan(result.fiveMinuteScan, 3)
+            && verifyScan(result.fiveMinuteScan, 0, 3)
             && fiveMinuteRecords[0].day == 1
             && fiveMinuteRecords[0].slot == 0
             && fiveMinuteRecords[0].yieldDayWh == 10
@@ -285,7 +291,7 @@ bool EnergyHistoryClass::runManualPersistenceProbe(ManualProbeResult& result)
     result.dayOk = dayWriteOk
             && dayReadOk
             && result.dayRecordsRead == 2
-            && verifyScan(result.dayScan, 3)
+            && verifyScan(result.dayScan, 2, 3)
             && dayRecords[0].dayOfYear == 1
             && dayRecords[0].yieldWh == 100
             && dayRecords[1].dayOfYear == 2
@@ -294,7 +300,7 @@ bool EnergyHistoryClass::runManualPersistenceProbe(ManualProbeResult& result)
     result.monthOk = monthWriteOk
             && monthReadOk
             && result.monthRecordsRead == 2
-            && verifyScan(result.monthScan, 3)
+            && verifyScan(result.monthScan, 2, 3)
             && monthRecords[0].month == 1
             && monthRecords[0].yieldWh == 1000
             && monthRecords[1].month == 2
@@ -322,10 +328,10 @@ bool EnergyHistoryClass::runManualPersistenceProbe(ManualProbeResult& result)
     if (headerSetupOk) {
         uint16_t mismatchRecordCount = 0;
         FiveMinuteRecord mismatchRecords[1];
-        const bool mismatchWriteOk = truncateProbeFile(fiveMinutePath)
-                && writeFiveMinute(TargetType::Inverter, ManualProbeSerial, ManualProbeYear, ManualProbeMonth, firstFiveMinuteBlock, 1, 0);
+        const bool mismatchWriteOk = truncateProbeFile(legacyFiveMinutePath)
+                && appendFiveMinuteBlock(legacyFiveMinutePath.c_str(), correctFiveMinuteHeader, firstFiveMinuteBlock, 1, 0);
         ScanResult mismatchScan;
-        const bool mismatchReadOk = readFiveMinuteFile(fiveMinutePath.c_str(), mismatchingFiveMinuteHeader, mismatchRecords, 1, mismatchRecordCount, mismatchScan);
+        const bool mismatchReadOk = readFiveMinuteFile(legacyFiveMinutePath.c_str(), mismatchingFiveMinuteHeader, mismatchRecords, 1, mismatchRecordCount, mismatchScan);
         result.headerMismatchOk = mismatchWriteOk && !mismatchReadOk && mismatchRecordCount == 0;
 
         uint8_t corruptHeader[FileHeaderSize];
@@ -333,16 +339,16 @@ bool EnergyHistoryClass::runManualPersistenceProbe(ManualProbeResult& result)
         uint16_t corruptHeaderRecordCount = 0;
         FiveMinuteRecord corruptHeaderRecords[1];
         ScanResult corruptHeaderScan;
-        const bool corruptHeaderWriteOk = writeProbeBytes(fiveMinutePath, corruptHeader, sizeof(corruptHeader));
-        const bool corruptHeaderReadOk = readFiveMinuteFile(fiveMinutePath.c_str(), correctFiveMinuteHeader, corruptHeaderRecords, 1, corruptHeaderRecordCount, corruptHeaderScan);
+        const bool corruptHeaderWriteOk = writeProbeBytes(legacyFiveMinutePath, corruptHeader, sizeof(corruptHeader));
+        const bool corruptHeaderReadOk = readFiveMinuteFile(legacyFiveMinutePath.c_str(), correctFiveMinuteHeader, corruptHeaderRecords, 1, corruptHeaderRecordCount, corruptHeaderScan);
         result.corruptHeaderOk = corruptHeaderWriteOk && !corruptHeaderReadOk && corruptHeaderRecordCount == 0;
 
         uint16_t corruptCrcRecordCount = 0;
         FiveMinuteRecord corruptCrcRecords[1];
-        const bool corruptCrcWriteOk = truncateProbeFile(fiveMinutePath)
-                && writeFiveMinute(TargetType::Inverter, ManualProbeSerial, ManualProbeYear, ManualProbeMonth, firstFiveMinuteBlock, 1, 0)
-                && overwriteProbeByte(fiveMinutePath, FileHeaderSize + BlockHeaderSize, 0xff);
-        const bool corruptCrcReadOk = readFiveMinuteFile(fiveMinutePath.c_str(), correctFiveMinuteHeader, corruptCrcRecords, 1, corruptCrcRecordCount, result.corruptCrcScan);
+        const bool corruptCrcWriteOk = truncateProbeFile(legacyFiveMinutePath)
+                && appendFiveMinuteBlock(legacyFiveMinutePath.c_str(), correctFiveMinuteHeader, firstFiveMinuteBlock, 1, 0)
+                && overwriteProbeByte(legacyFiveMinutePath, FileHeaderSize + BlockHeaderSize, 0xff);
+        const bool corruptCrcReadOk = readFiveMinuteFile(legacyFiveMinutePath.c_str(), correctFiveMinuteHeader, corruptCrcRecords, 1, corruptCrcRecordCount, result.corruptCrcScan);
         result.corruptCrcOk = corruptCrcWriteOk
                 && corruptCrcReadOk
                 && corruptCrcRecordCount == 0
@@ -354,17 +360,17 @@ bool EnergyHistoryClass::runManualPersistenceProbe(ManualProbeResult& result)
                 && result.corruptCrcScan.canTruncateFinalBlock;
         ScanResult corruptCrcTruncateScan;
         const bool corruptCrcTruncateOk = result.corruptCrcOk
-                && recoverFinalBlock(fiveMinutePath.c_str(), correctFiveMinuteHeader, corruptCrcTruncateScan)
+                && recoverFinalBlock(legacyFiveMinutePath.c_str(), correctFiveMinuteHeader, corruptCrcTruncateScan)
                 && corruptCrcTruncateScan.canTruncateFinalBlock
-                && probeFileSize(fiveMinutePath) == FileHeaderSize;
+                && probeFileSize(legacyFiveMinutePath) == FileHeaderSize;
 
         const uint8_t partialBlock[] = { 'E', 'H', 'B', '1' };
         uint16_t incompleteRecordCount = 0;
         FiveMinuteRecord incompleteRecords[1];
-        const bool incompleteWriteOk = truncateProbeFile(fiveMinutePath)
-                && writeFiveMinute(TargetType::Inverter, ManualProbeSerial, ManualProbeYear, ManualProbeMonth, firstFiveMinuteBlock, 1, 0)
-                && appendProbeBytes(fiveMinutePath, partialBlock, sizeof(partialBlock));
-        const bool incompleteReadOk = readFiveMinuteFile(fiveMinutePath.c_str(), correctFiveMinuteHeader, incompleteRecords, 1, incompleteRecordCount, result.incompleteFinalBlockScan);
+        const bool incompleteWriteOk = truncateProbeFile(legacyFiveMinutePath)
+                && appendFiveMinuteBlock(legacyFiveMinutePath.c_str(), correctFiveMinuteHeader, firstFiveMinuteBlock, 1, 0)
+                && appendProbeBytes(legacyFiveMinutePath, partialBlock, sizeof(partialBlock));
+        const bool incompleteReadOk = readFiveMinuteFile(legacyFiveMinutePath.c_str(), correctFiveMinuteHeader, incompleteRecords, 1, incompleteRecordCount, result.incompleteFinalBlockScan);
         result.incompleteFinalBlockOk = incompleteWriteOk
                 && incompleteReadOk
                 && incompleteRecordCount == 1
@@ -381,12 +387,12 @@ bool EnergyHistoryClass::runManualPersistenceProbe(ManualProbeResult& result)
         uint16_t truncateVerifyRecordCount = 0;
         FiveMinuteRecord truncateVerifyRecords[1];
         const bool truncateOk = result.incompleteFinalBlockOk
-                && recoverFinalBlock(fiveMinutePath.c_str(), correctFiveMinuteHeader, truncateScan);
+                && recoverFinalBlock(legacyFiveMinutePath.c_str(), correctFiveMinuteHeader, truncateScan);
         const bool truncateVerifyReadOk = truncateOk
-                && readFiveMinuteFile(fiveMinutePath.c_str(), correctFiveMinuteHeader, truncateVerifyRecords, 1, truncateVerifyRecordCount, truncateVerifyScan);
+                && readFiveMinuteFile(legacyFiveMinutePath.c_str(), correctFiveMinuteHeader, truncateVerifyRecords, 1, truncateVerifyRecordCount, truncateVerifyScan);
         const bool incompleteTruncateOk = truncateOk
                 && truncateScan.canTruncateFinalBlock
-                && probeFileSize(fiveMinutePath) == result.incompleteFinalBlockScan.lastValidOffset
+                && probeFileSize(legacyFiveMinutePath) == result.incompleteFinalBlockScan.lastValidOffset
                 && truncateVerifyReadOk
                 && truncateVerifyRecordCount == 1
                 && truncateVerifyScan.validBlocks == 1
@@ -397,9 +403,9 @@ bool EnergyHistoryClass::runManualPersistenceProbe(ManualProbeResult& result)
 
         uint16_t smallBufferRecordCount = 0;
         FiveMinuteRecord smallBufferRecords[1];
-        const bool smallBufferWriteOk = truncateProbeFile(fiveMinutePath)
-                && writeFiveMinute(TargetType::Inverter, ManualProbeSerial, ManualProbeYear, ManualProbeMonth, firstFiveMinuteBlock, 2, 0);
-        const bool smallBufferReadOk = readFiveMinuteFile(fiveMinutePath.c_str(), correctFiveMinuteHeader, smallBufferRecords, 1, smallBufferRecordCount, result.smallBufferScan);
+        const bool smallBufferWriteOk = truncateProbeFile(legacyFiveMinutePath)
+                && appendFiveMinuteBlock(legacyFiveMinutePath.c_str(), correctFiveMinuteHeader, firstFiveMinuteBlock, 2, 0);
+        const bool smallBufferReadOk = readFiveMinuteFile(legacyFiveMinutePath.c_str(), correctFiveMinuteHeader, smallBufferRecords, 1, smallBufferRecordCount, result.smallBufferScan);
         result.smallBufferOk = smallBufferWriteOk
                 && smallBufferReadOk
                 && smallBufferRecordCount == 1
@@ -421,9 +427,10 @@ bool EnergyHistoryClass::runManualPersistenceProbe(ManualProbeResult& result)
     }
 
     const bool removeFiveMinuteOk = LittleFS.remove(fiveMinutePath);
+    const bool removeLegacyFiveMinuteOk = LittleFS.remove(legacyFiveMinutePath);
     const bool removeDayOk = LittleFS.remove(dayPath);
     const bool removeMonthOk = LittleFS.remove(monthPath);
-    result.cleanupOk = removeFiveMinuteOk && removeDayOk && removeMonthOk;
+    result.cleanupOk = removeFiveMinuteOk && removeLegacyFiveMinuteOk && removeDayOk && removeMonthOk;
     result.demoDataOk = writeDemoData();
     ESP_LOGI(ProbeTag, "cleanup: 5m=%u day=%u month=%u", removeFiveMinuteOk, removeDayOk, removeMonthOk);
     ESP_LOGI(

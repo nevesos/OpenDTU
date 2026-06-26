@@ -40,7 +40,7 @@
                     class="form-control"
                     type="text"
                     :disabled="uploadFiles.length > 1"
-                    placeholder="/energy/5m/total_2026_05.eh5"
+                    placeholder="/energy/5m/total_2026_05.eh2"
                 />
             </div>
             <div class="col-12 col-lg-2 d-grid">
@@ -472,7 +472,7 @@ export default defineComponent({
                 };
             }
 
-            let match = this.selectedFile.path.match(/\/energy\/5m\/(total|inv_\d+)_(\d{4})_(\d{2})\.eh5$/);
+            let match = this.selectedFile.path.match(/\/energy\/5m\/(total|inv_\d+)_(\d{4})_(\d{2})\.(?:eh5|eh2)$/);
             if (match) {
                 return {
                     typeLabel: String(this.$t('energyhistory.FileTypeFiveMinute')),
@@ -619,7 +619,7 @@ export default defineComponent({
             this.loadSelectedFilePreview();
         },
         parseFileQuery(path: string): EnergyHistoryFileQuery | null {
-            let match = path.match(/\/energy\/5m\/(total|inv_\d+)_(\d{4})_(\d{2})\.eh5$/);
+            let match = path.match(/\/energy\/5m\/(total|inv_\d+)_(\d{4})_(\d{2})\.(?:eh5|eh2)$/);
             if (match) {
                 const year = Number(match[2] || 0);
                 const month = Number(match[3] || 0);
@@ -1145,7 +1145,7 @@ export default defineComponent({
             }
 
             const fileName = file.name.substring(file.name.lastIndexOf('/') + 1);
-            if (fileName.endsWith('.eh5')) {
+            if (fileName.endsWith('.eh5') || fileName.endsWith('.eh2')) {
                 return `/energy/5m/${fileName}`;
             }
             if (fileName.endsWith('.ehd')) {

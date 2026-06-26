@@ -29,8 +29,8 @@ static constexpr const char* DayDirectory = "/energy/day";
 static constexpr const char* MonthDirectory = "/energy/month";
 static constexpr size_t FileReadBufferSize = 32;
 static constexpr uint16_t MaxRecordsPerAppendBlock = 4;
-static constexpr size_t FiveMinuteDayFileBytes = FileHeaderSize + FiveMinuteSlotsPerDay * (BlockHeaderSize + FiveMinuteRecordSize);
-static constexpr size_t RetentionReserveBytes = 32 * 1024;
+static constexpr size_t FiveMinuteDayFileBytes = FileHeaderSize + FiveMinuteSlotsPerDay * FiveMinuteRecordV2Size;
+static constexpr size_t RetentionReserveBytes = 64 * 1024;
 static constexpr size_t RetentionMinimumFreeBytes = FiveMinuteDayFileBytes + RetentionReserveBytes;
 #if defined(ENERGY_HISTORY_MANUAL_PROBE)
 static constexpr const char* EnergyHistoryTag = "EnergyHistory";
@@ -127,6 +127,18 @@ uint32_t finalizeCrc32(const uint32_t crc)
     return ~crc;
 }
 
+uint16_t calculateCrc16Ccitt(const uint8_t* data, const size_t length)
+{
+    uint16_t crc = 0xffff;
+    for (size_t i = 0; i < length; i++) {
+        crc ^= static_cast<uint16_t>(data[i]) << 8;
+        for (uint8_t bit = 0; bit < 8; bit++) {
+            crc = (crc & 0x8000) != 0 ? static_cast<uint16_t>((crc << 1) ^ 0x1021) : static_cast<uint16_t>(crc << 1);
+        }
+    }
+    return crc;
+}
+
 uint8_t expectedRecordSize(const FileType fileType)
 {
     switch (fileType) {
@@ -156,11 +168,17 @@ uint8_t expectedRecordSize(const FileType fileType)
 
 [[maybe_unused]] bool validateHeaderFields(const FileHeader& header)
 {
-    if (std::memcmp(header.magic, FileMagic, sizeof(header.magic)) != 0) {
+    const bool isV1 = std::memcmp(header.magic, FileMagic, sizeof(header.magic)) == 0;
+    const bool isV2 = std::memcmp(header.magic, FileMagicV2, sizeof(header.magic)) == 0;
+    if (!isV1 && !isV2) {
         return false;
     }
 
-    if (header.version != Version || header.headerSize != FileHeaderSize) {
+    if (header.headerSize != FileHeaderSize) {
+        return false;
+    }
+
+    if ((isV1 && header.version != Version) || (isV2 && header.version != VersionV2)) {
         return false;
     }
 
@@ -175,7 +193,12 @@ uint8_t expectedRecordSize(const FileType fileType)
     }
 
     const FileType fileType = static_cast<FileType>(header.fileType);
-    if (header.recordSize != expectedRecordSize(fileType)) {
+    const uint8_t expectedSize = isV2 && fileType == FileType::FiveMinute ? FiveMinuteRecordV2Size : expectedRecordSize(fileType);
+    if (header.recordSize != expectedSize) {
+        return false;
+    }
+
+    if (isV2 && fileType != FileType::FiveMinute) {
         return false;
     }
 
@@ -310,6 +333,29 @@ uint8_t expectedRecordSize(const FileType fileType)
             && record.day <= 31
             && record.slot < FiveMinuteSlotsPerDay
             && (record.flags & ~KnownRecordFlagsMask) == 0;
+}
+
+[[maybe_unused]] bool encodeFiveMinuteRecordV2(const FiveMinuteRecord& record, uint8_t* output, const size_t outputSize)
+{
+    if (outputSize < FiveMinuteRecordV2Size || !encodeFiveMinuteRecord(record, output, FiveMinuteRecordSize)) {
+        return false;
+    }
+
+    writeUint16Le(output + FiveMinuteRecordSize, calculateCrc16Ccitt(output, FiveMinuteRecordSize));
+    return true;
+}
+
+[[maybe_unused]] bool decodeFiveMinuteRecordV2(const uint8_t* input, const size_t inputSize, FiveMinuteRecord& record)
+{
+    if (inputSize < FiveMinuteRecordV2Size) {
+        return false;
+    }
+
+    if (calculateCrc16Ccitt(input, FiveMinuteRecordSize) != readUint16Le(input + FiveMinuteRecordSize)) {
+        return false;
+    }
+
+    return decodeFiveMinuteRecord(input, FiveMinuteRecordSize, record);
 }
 
 [[maybe_unused]] bool encodeDayRecord(const DayRecord& record, uint8_t* output, const size_t outputSize)
@@ -459,7 +505,7 @@ String baseName(const String& path)
 bool parseRetentionCandidateName(const String& path, uint16_t& year, uint8_t& month)
 {
     const String name = baseName(path);
-    if (name.length() < 16 || !name.startsWith("inv_") || !name.endsWith(".eh5")) {
+    if (name.length() < 16 || !name.startsWith("inv_") || (!name.endsWith(".eh5") && !name.endsWith(".eh2"))) {
         return false;
     }
 
@@ -472,7 +518,8 @@ bool parseRetentionCandidateName(const String& path, uint16_t& year, uint8_t& mo
     const String serial = name.substring(4, yearSeparator);
     const String yearString = name.substring(yearSeparator + 1, monthSeparator);
     const String monthString = name.substring(monthSeparator + 1, monthSeparator + 3);
-    if (serial.isEmpty() || yearString.length() != 4 || monthString.length() != 2 || name.substring(monthSeparator + 3) != ".eh5") {
+    const String extension = name.substring(monthSeparator + 3);
+    if (serial.isEmpty() || yearString.length() != 4 || monthString.length() != 2 || (extension != ".eh5" && extension != ".eh2")) {
         return false;
     }
 
@@ -972,6 +1019,23 @@ bool EnergyHistoryClass::makeFileHeader(const FileType fileType, const TargetTyp
     return validateHeaderFields(header);
 }
 
+bool EnergyHistoryClass::makeFiveMinuteV2FileHeader(const TargetType targetType, const uint64_t serial, const uint16_t year, const uint8_t month, FileHeader& header)
+{
+    std::memset(&header, 0, sizeof(header));
+    std::memcpy(header.magic, FileMagicV2, sizeof(header.magic));
+    header.fileType = static_cast<uint8_t>(FileType::FiveMinute);
+    header.version = VersionV2;
+    header.headerSize = FileHeaderSize;
+    header.recordSize = FiveMinuteRecordV2Size;
+    header.year = year;
+    header.month = month;
+    header.targetType = static_cast<uint8_t>(targetType);
+    header.serial = serial;
+    header.intervalSec = FiveMinuteIntervalSec;
+
+    return validateHeaderFields(header);
+}
+
 String EnergyHistoryClass::makeFiveMinutePath(const TargetType targetType, const uint64_t serial, const uint16_t year, const uint8_t month)
 {
     if (month < 1 || month > 12) {
@@ -985,6 +1049,25 @@ String EnergyHistoryClass::makeFiveMinutePath(const TargetType targetType, const
 
     char path[80];
     if (std::snprintf(path, sizeof(path), "%s/%s_%04u_%02u.eh5", FiveMinuteDirectory, targetName, year, month) <= 0) {
+        return String();
+    }
+
+    return String(path);
+}
+
+String EnergyHistoryClass::makeFiveMinuteV2Path(const TargetType targetType, const uint64_t serial, const uint16_t year, const uint8_t month)
+{
+    if (month < 1 || month > 12) {
+        return String();
+    }
+
+    char targetName[32];
+    if (!formatTargetName(targetName, sizeof(targetName), targetType, serial)) {
+        return String();
+    }
+
+    char path[80];
+    if (std::snprintf(path, sizeof(path), "%s/%s_%04u_%02u.eh2", FiveMinuteDirectory, targetName, year, month) <= 0) {
         return String();
     }
 
@@ -1023,17 +1106,19 @@ String EnergyHistoryClass::makeMonthPath(const TargetType targetType, const uint
 
 bool EnergyHistoryClass::writeFiveMinute(const TargetType targetType, const uint64_t serial, const uint16_t year, const uint8_t month, const FiveMinuteRecord* records, const uint16_t recordCount, const uint16_t blockIndex)
 {
+    (void)blockIndex;
+
     FileHeader header;
-    if (!makeFileHeader(FileType::FiveMinute, targetType, serial, year, month, header)) {
+    if (!makeFiveMinuteV2FileHeader(targetType, serial, year, month, header)) {
         return false;
     }
 
-    const String path = makeFiveMinutePath(targetType, serial, year, month);
+    const String path = makeFiveMinuteV2Path(targetType, serial, year, month);
     if (path.isEmpty()) {
         return false;
     }
 
-    return appendFiveMinuteBlock(path.c_str(), header, records, recordCount, blockIndex);
+    return appendFiveMinuteRecordV2(path.c_str(), header, records, recordCount);
 }
 
 bool EnergyHistoryClass::writeDay(const TargetType targetType, const uint64_t serial, const uint16_t year, const DayRecord* records, const uint16_t recordCount, const uint16_t blockIndex)
@@ -1068,17 +1153,7 @@ bool EnergyHistoryClass::writeMonth(const TargetType targetType, const uint64_t 
 
 bool EnergyHistoryClass::readFiveMinute(const TargetType targetType, const uint64_t serial, const uint16_t year, const uint8_t month, FiveMinuteRecord* records, const uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result)
 {
-    FileHeader header;
-    if (!makeFileHeader(FileType::FiveMinute, targetType, serial, year, month, header)) {
-        return false;
-    }
-
-    const String path = makeFiveMinutePath(targetType, serial, year, month);
-    if (path.isEmpty()) {
-        return false;
-    }
-
-    return readFiveMinuteFile(path.c_str(), header, records, recordCapacity, recordCount, result);
+    return queryFiveMinuteDay(targetType, serial, year, month, 0, records, recordCapacity, recordCount, result);
 }
 
 bool EnergyHistoryClass::readDay(const TargetType targetType, const uint64_t serial, const uint16_t year, DayRecord* records, const uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result)
@@ -1205,6 +1280,49 @@ bool EnergyHistoryClass::appendFiveMinuteBlock(const char* path, const FileHeade
     }
 
     return appendBlock(path, expectedHeader, blockIndex, records[0].day, payload, recordCount * FiveMinuteRecordSize, recordCount);
+}
+
+bool EnergyHistoryClass::appendFiveMinuteRecordV2(const char* path, const FileHeader& expectedHeader, const FiveMinuteRecord* records, const uint16_t recordCount)
+{
+    if (path == nullptr
+            || records == nullptr
+            || recordCount == 0
+            || expectedHeader.fileType != static_cast<uint8_t>(FileType::FiveMinute)
+            || expectedHeader.version != VersionV2
+            || expectedHeader.recordSize != FiveMinuteRecordV2Size) {
+        return false;
+    }
+
+    if (!ensureEnergyDirectories(expectedHeader.fileType)) {
+        return false;
+    }
+
+    const bool newHistoryFile = isNewHistoryFile(path);
+    bool retentionRemovedFiles = false;
+    if (newHistoryFile && !ensureRetentionFreeSpaceForNewFile(retentionRemovedFiles)) {
+        return false;
+    }
+
+    if (!ensureFileHeader(path, expectedHeader)) {
+        return false;
+    }
+
+    File file = LittleFS.open(path, "a");
+    if (!file) {
+        return false;
+    }
+
+    uint8_t encodedRecord[FiveMinuteRecordV2Size];
+    for (uint16_t i = 0; i < recordCount; i++) {
+        if (!encodeFiveMinuteRecordV2(records[i], encodedRecord, sizeof(encodedRecord))
+                || !writeFull(file, encodedRecord, sizeof(encodedRecord))) {
+            return false;
+        }
+    }
+
+    file.flush();
+    markHistoryChanged(true, newHistoryFile || retentionRemovedFiles);
+    return true;
 }
 
 bool EnergyHistoryClass::appendDayBlock(const char* path, const FileHeader& expectedHeader, const DayRecord* records, const uint16_t recordCount, const uint16_t blockIndex)
@@ -1478,6 +1596,12 @@ bool EnergyHistoryClass::scanFiveMinuteFile(const char* path, const FileHeader& 
     return readFiveMinuteFile(path, expectedHeader, nullptr, 0, recordCount, result);
 }
 
+bool EnergyHistoryClass::scanFiveMinuteFileV2(const char* path, const FileHeader& expectedHeader, ScanResult& result)
+{
+    uint16_t recordCount = 0;
+    return readFiveMinuteFileV2(path, expectedHeader, nullptr, 0, recordCount, result);
+}
+
 template <typename Record>
 bool EnergyHistoryClass::readRecordFile(const char* path, const FileHeader& expectedHeader, const FileType fileType, const uint8_t recordSize, Record* records, const uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result, bool (*decodeRecord)(const uint8_t*, size_t, Record&), bool (*upsertRecord)(Record*, uint16_t, uint16_t&, const Record&))
 {
@@ -1602,6 +1726,63 @@ bool EnergyHistoryClass::readFiveMinuteFile(const char* path, const FileHeader& 
     return readRecordFile(path, expectedHeader, FileType::FiveMinute, FiveMinuteRecordSize, records, recordCapacity, recordCount, result, decodeFiveMinuteRecord, upsertFiveMinuteRecord);
 }
 
+bool EnergyHistoryClass::readFiveMinuteFileV2(const char* path, const FileHeader& expectedHeader, FiveMinuteRecord* records, const uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result)
+{
+    if (path == nullptr
+            || expectedHeader.fileType != static_cast<uint8_t>(FileType::FiveMinute)
+            || expectedHeader.version != VersionV2
+            || expectedHeader.recordSize != FiveMinuteRecordV2Size) {
+        return false;
+    }
+
+    recordCount = 0;
+
+    File file = LittleFS.open(path, "r", false);
+    if (!file || file.size() < FileHeaderSize || !readValidatedFileHeader(file, expectedHeader)) {
+        return false;
+    }
+
+    result.filesScanned++;
+    result.fileSize = file.size();
+    result.lastValidOffset = FileHeaderSize;
+
+    while (file.available() > 0) {
+        const size_t remaining = result.fileSize - file.position();
+        if (remaining < FiveMinuteRecordV2Size) {
+            result.skippedRecords++;
+            result.invalidFinalBlock = true;
+            result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
+            break;
+        }
+
+        uint8_t encodedRecord[FiveMinuteRecordV2Size];
+        if (!readFull(file, encodedRecord, sizeof(encodedRecord))) {
+            result.skippedRecords++;
+            result.invalidFinalBlock = true;
+            result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
+            break;
+        }
+
+        FiveMinuteRecord record;
+        if (!decodeFiveMinuteRecordV2(encodedRecord, sizeof(encodedRecord), record)) {
+            result.skippedRecords++;
+            if (file.position() == result.fileSize) {
+                result.invalidFinalBlock = true;
+                result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
+            }
+            continue;
+        }
+
+        result.validRecords++;
+        result.lastValidOffset = file.position();
+        if (!upsertFiveMinuteRecord(records, recordCapacity, recordCount, record)) {
+            result.skippedRecords++;
+        }
+    }
+
+    return true;
+}
+
 bool EnergyHistoryClass::readDayFile(const char* path, const FileHeader& expectedHeader, DayRecord* records, const uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result)
 {
     return readRecordFile(path, expectedHeader, FileType::Day, DayRecordSize, records, recordCapacity, recordCount, result, decodeDayRecord, upsertDayRecord);
@@ -1669,6 +1850,10 @@ bool EnergyHistoryClass::scanManagedFile(const String& path, ScanResult& result)
     }
 
     file.close();
+    if (header.version == VersionV2 && header.fileType == static_cast<uint8_t>(FileType::FiveMinute)) {
+        return scanFiveMinuteFileV2(normalizedPath.c_str(), header, result);
+    }
+
     return scanFile(normalizedPath.c_str(), header, result);
 }
 
@@ -1697,6 +1882,16 @@ bool EnergyHistoryClass::recoverManagedFile(const String& path, ScanResult& resu
     }
 
     file.close();
+    if (header.version == VersionV2 && header.fileType == static_cast<uint8_t>(FileType::FiveMinute)) {
+        if (!scanFiveMinuteFileV2(normalizedPath.c_str(), header, result)) {
+            return false;
+        }
+        if (!result.canTruncateFinalBlock) {
+            return true;
+        }
+        return truncateFile(normalizedPath.c_str(), result.lastValidOffset);
+    }
+
     return recoverFinalBlock(normalizedPath.c_str(), header, result);
 }
 
@@ -1706,130 +1901,201 @@ bool EnergyHistoryClass::queryFiveMinuteDay(const TargetType targetType, const u
     recordCount = 0;
     if (records == nullptr
             || recordCapacity == 0
-            || day < 1
             || day > 31) {
         return false;
     }
 
-    FileHeader header;
-    if (!makeFileHeader(FileType::FiveMinute, targetType, serial, year, month, header)) {
-        return false;
+    auto mergeScan = [](ScanResult& target, const ScanResult& source) {
+        target.filesScanned += source.filesScanned;
+        target.validBlocks += source.validBlocks;
+        target.skippedBlocks += source.skippedBlocks;
+        target.validRecords += source.validRecords;
+        target.skippedRecords += source.skippedRecords;
+        target.fileSize += source.fileSize;
+        target.lastValidOffset += source.lastValidOffset;
+        target.invalidFinalBlock = target.invalidFinalBlock || source.invalidFinalBlock;
+        target.canTruncateFinalBlock = target.canTruncateFinalBlock || source.canTruncateFinalBlock;
+    };
+
+    bool readAnyFile = false;
+
+    FileHeader legacyHeader;
+    if (makeFileHeader(FileType::FiveMinute, targetType, serial, year, month, legacyHeader)) {
+        const String legacyPath = makeFiveMinutePath(targetType, serial, year, month);
+        File file = LittleFS.open(legacyPath.c_str(), "r", false);
+        if (file && file.size() >= FileHeaderSize && readValidatedFileHeader(file, legacyHeader)) {
+            ScanResult legacyScan;
+            legacyScan.filesScanned++;
+            legacyScan.fileSize = file.size();
+            legacyScan.lastValidOffset = FileHeaderSize;
+            readAnyFile = true;
+
+            while (file.available() > 0) {
+                const size_t remaining = legacyScan.fileSize - file.position();
+                if (remaining < BlockHeaderSize) {
+                    legacyScan.skippedBlocks++;
+                    legacyScan.invalidFinalBlock = true;
+                    legacyScan.canTruncateFinalBlock = legacyScan.lastValidOffset < legacyScan.fileSize;
+                    break;
+                }
+
+                uint8_t encodedBlockHeader[BlockHeaderSize];
+                if (!readFull(file, encodedBlockHeader, sizeof(encodedBlockHeader))) {
+                    legacyScan.skippedBlocks++;
+                    legacyScan.invalidFinalBlock = true;
+                    legacyScan.canTruncateFinalBlock = legacyScan.lastValidOffset < legacyScan.fileSize;
+                    break;
+                }
+
+                BlockHeader blockHeader;
+                if (!decodeBlockHeader(encodedBlockHeader, sizeof(encodedBlockHeader), blockHeader)
+                        || blockHeader.recordCount == 0
+                        || blockHeader.payloadSize == 0
+                        || blockHeader.payloadSize != blockHeader.recordCount * FiveMinuteRecordSize
+                        || legacyScan.fileSize - file.position() < blockHeader.payloadSize) {
+                    legacyScan.skippedBlocks++;
+                    legacyScan.invalidFinalBlock = true;
+                    legacyScan.canTruncateFinalBlock = legacyScan.lastValidOffset < legacyScan.fileSize;
+                    break;
+                }
+
+                const size_t payloadStart = file.position();
+                if (day != 0 && blockHeader.startKey != day) {
+                    if (!file.seek(payloadStart + blockHeader.payloadSize)) {
+                        legacyScan.skippedBlocks++;
+                        legacyScan.invalidFinalBlock = true;
+                        legacyScan.canTruncateFinalBlock = legacyScan.lastValidOffset < legacyScan.fileSize;
+                        break;
+                    }
+                    legacyScan.lastValidOffset = file.position();
+                    continue;
+                }
+
+                uint32_t crc = 0xffffffff;
+                uint16_t bytesRemaining = blockHeader.payloadSize;
+                uint8_t buffer[FileReadBufferSize];
+                while (bytesRemaining > 0) {
+                    const size_t chunkSize = bytesRemaining < sizeof(buffer) ? bytesRemaining : sizeof(buffer);
+                    if (!readFull(file, buffer, chunkSize)) {
+                        legacyScan.skippedBlocks++;
+                        legacyScan.invalidFinalBlock = true;
+                        legacyScan.canTruncateFinalBlock = legacyScan.lastValidOffset < legacyScan.fileSize;
+                        mergeScan(result, legacyScan);
+                        return true;
+                    }
+
+                    crc = updateCrc32(crc, buffer, chunkSize);
+                    bytesRemaining -= chunkSize;
+                }
+
+                if (blockHeader.crc32Payload != finalizeCrc32(crc)) {
+                    legacyScan.skippedBlocks++;
+                    if (file.position() == legacyScan.fileSize) {
+                        legacyScan.invalidFinalBlock = true;
+                        legacyScan.canTruncateFinalBlock = legacyScan.lastValidOffset < legacyScan.fileSize;
+                    }
+                    continue;
+                }
+
+                if (!file.seek(payloadStart)) {
+                    legacyScan.skippedBlocks++;
+                    legacyScan.invalidFinalBlock = true;
+                    legacyScan.canTruncateFinalBlock = legacyScan.lastValidOffset < legacyScan.fileSize;
+                    break;
+                }
+
+                for (uint16_t i = 0; i < blockHeader.recordCount; i++) {
+                    uint8_t encodedRecord[FiveMinuteRecordSize];
+                    if (!readFull(file, encodedRecord, sizeof(encodedRecord))) {
+                        legacyScan.skippedBlocks++;
+                        legacyScan.invalidFinalBlock = true;
+                        legacyScan.canTruncateFinalBlock = legacyScan.lastValidOffset < legacyScan.fileSize;
+                        mergeScan(result, legacyScan);
+                        return true;
+                    }
+
+                    FiveMinuteRecord record;
+                    if (!decodeFiveMinuteRecord(encodedRecord, sizeof(encodedRecord), record)) {
+                        legacyScan.skippedRecords++;
+                        continue;
+                    }
+
+                    legacyScan.validRecords++;
+                    if ((day == 0 || record.day == day) && !upsertFiveMinuteRecord(records, recordCapacity, recordCount, record)) {
+                        legacyScan.skippedRecords++;
+                    }
+                }
+
+                legacyScan.validBlocks++;
+                legacyScan.lastValidOffset = file.position();
+            }
+
+            mergeScan(result, legacyScan);
+        }
     }
 
-    const String path = makeFiveMinutePath(targetType, serial, year, month);
-    if (path.isEmpty()) {
-        return false;
+    FileHeader v2Header;
+    if (makeFiveMinuteV2FileHeader(targetType, serial, year, month, v2Header)) {
+        const String v2Path = makeFiveMinuteV2Path(targetType, serial, year, month);
+        File file = LittleFS.open(v2Path.c_str(), "r", false);
+        if (file && file.size() >= FileHeaderSize && readValidatedFileHeader(file, v2Header)) {
+            ScanResult v2Scan;
+            v2Scan.filesScanned++;
+            v2Scan.fileSize = file.size();
+            v2Scan.lastValidOffset = FileHeaderSize;
+            readAnyFile = true;
+
+            while (file.available() > 0) {
+                const size_t remaining = v2Scan.fileSize - file.position();
+                if (remaining < FiveMinuteRecordV2Size) {
+                    v2Scan.skippedRecords++;
+                    v2Scan.invalidFinalBlock = true;
+                    v2Scan.canTruncateFinalBlock = v2Scan.lastValidOffset < v2Scan.fileSize;
+                    break;
+                }
+
+                uint8_t encodedRecord[FiveMinuteRecordV2Size];
+                if (!readFull(file, encodedRecord, sizeof(encodedRecord))) {
+                    v2Scan.skippedRecords++;
+                    v2Scan.invalidFinalBlock = true;
+                    v2Scan.canTruncateFinalBlock = v2Scan.lastValidOffset < v2Scan.fileSize;
+                    break;
+                }
+
+                FiveMinuteRecord record;
+                if (!decodeFiveMinuteRecordV2(encodedRecord, sizeof(encodedRecord), record)) {
+                    v2Scan.skippedRecords++;
+                    if (file.position() == v2Scan.fileSize) {
+                        v2Scan.invalidFinalBlock = true;
+                        v2Scan.canTruncateFinalBlock = v2Scan.lastValidOffset < v2Scan.fileSize;
+                    }
+                    continue;
+                }
+
+                v2Scan.validRecords++;
+                v2Scan.lastValidOffset = file.position();
+                if ((day == 0 || record.day == day) && !upsertFiveMinuteRecord(records, recordCapacity, recordCount, record)) {
+                    v2Scan.skippedRecords++;
+                }
+            }
+
+            mergeScan(result, v2Scan);
+        }
     }
 
-    File file = LittleFS.open(path.c_str(), "r", false);
-    if (!file || file.size() < FileHeaderSize || !readValidatedFileHeader(file, header)) {
-        return false;
+    for (uint16_t i = 1; i < recordCount; i++) {
+        FiveMinuteRecord value = records[i];
+        uint16_t j = i;
+        while (j > 0
+                && (records[j - 1].day > value.day
+                        || (records[j - 1].day == value.day && records[j - 1].slot > value.slot))) {
+            records[j] = records[j - 1];
+            j--;
+        }
+        records[j] = value;
     }
 
-    result.filesScanned++;
-    result.fileSize = file.size();
-    result.lastValidOffset = FileHeaderSize;
-
-    while (file.available() > 0) {
-        const size_t remaining = result.fileSize - file.position();
-        if (remaining < BlockHeaderSize) {
-            result.skippedBlocks++;
-            result.invalidFinalBlock = true;
-            result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
-            break;
-        }
-
-        uint8_t encodedBlockHeader[BlockHeaderSize];
-        if (!readFull(file, encodedBlockHeader, sizeof(encodedBlockHeader))) {
-            result.skippedBlocks++;
-            result.invalidFinalBlock = true;
-            result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
-            break;
-        }
-
-        BlockHeader blockHeader;
-        if (!decodeBlockHeader(encodedBlockHeader, sizeof(encodedBlockHeader), blockHeader)
-                || blockHeader.recordCount == 0
-                || blockHeader.payloadSize == 0
-                || blockHeader.payloadSize != blockHeader.recordCount * FiveMinuteRecordSize
-                || result.fileSize - file.position() < blockHeader.payloadSize) {
-            result.skippedBlocks++;
-            result.invalidFinalBlock = true;
-            result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
-            break;
-        }
-
-        const size_t payloadStart = file.position();
-        if (blockHeader.startKey != day) {
-            if (!file.seek(payloadStart + blockHeader.payloadSize)) {
-                result.skippedBlocks++;
-                result.invalidFinalBlock = true;
-                result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
-                return true;
-            }
-
-            result.lastValidOffset = file.position();
-            continue;
-        }
-
-        uint32_t crc = 0xffffffff;
-        uint16_t bytesRemaining = blockHeader.payloadSize;
-        uint8_t buffer[FileReadBufferSize];
-        while (bytesRemaining > 0) {
-            const size_t chunkSize = bytesRemaining < sizeof(buffer) ? bytesRemaining : sizeof(buffer);
-            if (!readFull(file, buffer, chunkSize)) {
-                result.skippedBlocks++;
-                result.invalidFinalBlock = true;
-                result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
-                return true;
-            }
-
-            crc = updateCrc32(crc, buffer, chunkSize);
-            bytesRemaining -= chunkSize;
-        }
-
-        if (blockHeader.crc32Payload != finalizeCrc32(crc)) {
-            result.skippedBlocks++;
-            if (file.position() == result.fileSize) {
-                result.invalidFinalBlock = true;
-                result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
-            }
-            continue;
-        }
-
-        if (!file.seek(payloadStart)) {
-            result.skippedBlocks++;
-            result.invalidFinalBlock = true;
-            result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
-            return true;
-        }
-
-        for (uint16_t i = 0; i < blockHeader.recordCount; i++) {
-            uint8_t encodedRecord[FiveMinuteRecordSize];
-            if (!readFull(file, encodedRecord, sizeof(encodedRecord))) {
-                result.skippedBlocks++;
-                result.invalidFinalBlock = true;
-                result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
-                return true;
-            }
-
-            FiveMinuteRecord record;
-            if (!decodeFiveMinuteRecord(encodedRecord, sizeof(encodedRecord), record)) {
-                result.skippedRecords++;
-                continue;
-            }
-
-            result.validRecords++;
-            if (record.day == day && !upsertFiveMinuteRecord(records, recordCapacity, recordCount, record)) {
-                result.skippedRecords++;
-            }
-        }
-
-        result.validBlocks++;
-        result.lastValidOffset = file.position();
-    }
-
-    return true;
+    return readAnyFile;
 }
 
 bool EnergyHistoryClass::queryDay(const TargetType targetType, const uint64_t serial, const uint16_t year, const uint16_t fromDayOfYear, const uint16_t toDayOfYear, DayRecord* records, const uint16_t recordCapacity, uint16_t& recordCount, ScanResult& result)
@@ -2230,248 +2496,48 @@ bool EnergyHistoryClass::buildDayRecordsFromFiveMinuteMonth(const TargetType tar
         return false;
     }
 
-    const uint16_t firstDay = firstDayOfYearForMonth(year, month);
-    const uint8_t monthDays = daysInMonth(year, month);
-    if (firstDay == 0 || monthDays == 0) {
-        return false;
-    }
+    auto mergeScan = [](ScanResult& target, const ScanResult& source) {
+        target.filesScanned += source.filesScanned;
+        target.validBlocks += source.validBlocks;
+        target.skippedBlocks += source.skippedBlocks;
+        target.validRecords += source.validRecords;
+        target.skippedRecords += source.skippedRecords;
+        target.fileSize += source.fileSize;
+        target.lastValidOffset += source.lastValidOffset;
+        target.invalidFinalBlock = target.invalidFinalBlock || source.invalidFinalBlock;
+        target.canTruncateFinalBlock = target.canTruncateFinalBlock || source.canTruncateFinalBlock;
+    };
 
-    int8_t compactIndexByDay[31];
-    std::memset(compactIndexByDay, -1, sizeof(compactIndexByDay));
-    uint8_t dayIndexByCompact[31] = {};
-    uint8_t compactDayCount = 0;
+    bool ok = true;
     for (uint16_t i = 0; i < requestedDayCount; i++) {
-        const uint16_t dayOfYearValue = requestedDaysOfYear[i];
-        if (dayOfYearValue < firstDay || dayOfYearValue >= firstDay + monthDays) {
+        uint8_t recordMonth = 0;
+        uint8_t recordDay = 0;
+        if (!monthDayFromDayOfYear(year, requestedDaysOfYear[i], recordMonth, recordDay) || recordMonth != month) {
             continue;
         }
 
-        const uint8_t dayIndex = static_cast<uint8_t>(dayOfYearValue - firstDay);
-        if (compactIndexByDay[dayIndex] >= 0) {
-            continue;
-        }
-
-        compactIndexByDay[dayIndex] = static_cast<int8_t>(compactDayCount);
-        dayIndexByCompact[compactDayCount] = dayIndex;
-        compactDayCount++;
-    }
-
-    if (compactDayCount == 0) {
-        return true;
-    }
-
-    FileHeader header;
-    if (!makeFileHeader(FileType::FiveMinute, targetType, serial, year, month, header)) {
-        return false;
-    }
-
-    const String path = makeFiveMinutePath(targetType, serial, year, month);
-    if (path.isEmpty()) {
-        return false;
-    }
-
-    File file = LittleFS.open(path.c_str(), "r", false);
-    if (!file || file.size() < FileHeaderSize || !readValidatedFileHeader(file, header)) {
-        return false;
-    }
-
-    const size_t slotCount = static_cast<size_t>(compactDayCount) * FiveMinuteSlotsPerDay;
-    std::unique_ptr<uint32_t[]> yieldBySlot(new (std::nothrow) uint32_t[slotCount]());
-    std::unique_ptr<uint8_t[]> flagsBySlot(new (std::nothrow) uint8_t[slotCount]());
-    if (!yieldBySlot || !flagsBySlot) {
-        return false;
-    }
-
-    result.filesScanned++;
-    result.fileSize = file.size();
-    result.lastValidOffset = FileHeaderSize;
-
-    while (file.available() > 0) {
-        const size_t remaining = result.fileSize - file.position();
-        if (remaining < BlockHeaderSize) {
-            result.skippedBlocks++;
-            result.invalidFinalBlock = true;
-            result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
-            break;
-        }
-
-        uint8_t encodedBlockHeader[BlockHeaderSize];
-        if (!readFull(file, encodedBlockHeader, sizeof(encodedBlockHeader))) {
-            result.skippedBlocks++;
-            result.invalidFinalBlock = true;
-            result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
-            break;
-        }
-
-        BlockHeader blockHeader;
-        if (!decodeBlockHeader(encodedBlockHeader, sizeof(encodedBlockHeader), blockHeader)
-                || blockHeader.recordCount == 0
-                || blockHeader.payloadSize == 0
-                || blockHeader.payloadSize != blockHeader.recordCount * FiveMinuteRecordSize
-                || result.fileSize - file.position() < blockHeader.payloadSize) {
-            result.skippedBlocks++;
-            result.invalidFinalBlock = true;
-            result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
-            break;
-        }
-
-        const size_t payloadStart = file.position();
-        if (blockHeader.startKey < 1
-                || blockHeader.startKey > monthDays
-                || compactIndexByDay[blockHeader.startKey - 1] < 0) {
-            if (!file.seek(payloadStart + blockHeader.payloadSize)) {
-                result.skippedBlocks++;
-                result.invalidFinalBlock = true;
-                result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
-                return true;
-            }
-
-            result.lastValidOffset = file.position();
-            continue;
-        }
-
-        uint32_t crc = 0xffffffff;
-        uint16_t bytesRemaining = blockHeader.payloadSize;
-        uint8_t buffer[FileReadBufferSize];
-        while (bytesRemaining > 0) {
-            const size_t chunkSize = bytesRemaining < sizeof(buffer) ? bytesRemaining : sizeof(buffer);
-            if (!readFull(file, buffer, chunkSize)) {
-                result.skippedBlocks++;
-                result.invalidFinalBlock = true;
-                result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
-                return true;
-            }
-
-            crc = updateCrc32(crc, buffer, chunkSize);
-            bytesRemaining -= chunkSize;
-        }
-
-        if (blockHeader.crc32Payload != finalizeCrc32(crc)) {
-            result.skippedBlocks++;
-            if (file.position() == result.fileSize) {
-                result.invalidFinalBlock = true;
-                result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
-            }
-            continue;
-        }
-
-        if (!file.seek(payloadStart)) {
-            result.skippedBlocks++;
-            result.invalidFinalBlock = true;
-            result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
-            return true;
-        }
-
-        for (uint16_t i = 0; i < blockHeader.recordCount; i++) {
-            uint8_t encodedRecord[FiveMinuteRecordSize];
-            if (!readFull(file, encodedRecord, sizeof(encodedRecord))) {
-                result.skippedBlocks++;
-                result.invalidFinalBlock = true;
-                result.canTruncateFinalBlock = result.lastValidOffset < result.fileSize;
-                return true;
-            }
-
-            FiveMinuteRecord sample;
-            if (!decodeFiveMinuteRecord(encodedRecord, sizeof(encodedRecord), sample)) {
-                result.skippedRecords++;
-                continue;
-            }
-
-            result.validRecords++;
-            if ((sample.flags & RecordFlagValid) == 0 || sample.day < 1 || sample.day > monthDays) {
-                continue;
-            }
-
-            const int8_t compactIndex = compactIndexByDay[sample.day - 1];
-            if (compactIndex < 0) {
-                continue;
-            }
-
-            const size_t slotIndex = static_cast<size_t>(compactIndex) * FiveMinuteSlotsPerDay + sample.slot;
-            yieldBySlot[slotIndex] = sample.yieldDayWh;
-            flagsBySlot[slotIndex] = sample.flags;
-        }
-
-        result.validBlocks++;
-        result.lastValidOffset = file.position();
-    }
-
-    for (uint8_t compactIndex = 0; compactIndex < compactDayCount; compactIndex++) {
         if (recordCount >= recordCapacity) {
             result.skippedRecords++;
             break;
         }
 
-        const uint8_t dayIndex = dayIndexByCompact[compactIndex];
-        const uint16_t dayOfYearValue = static_cast<uint16_t>(firstDay + dayIndex);
-        uint32_t maxYieldWh = 0;
-        uint32_t maxPowerW = 0;
-        uint32_t runtimeMin = 0;
-        uint16_t sampleCount = 0;
-        uint16_t previousSlot = 0;
-        uint32_t previousYieldWh = 0;
-        bool previousValid = false;
         DayRecord record;
-        std::memset(&record, 0, sizeof(record));
-        record.dayOfYear = dayOfYearValue;
-
-        for (uint16_t slot = 0; slot < FiveMinuteSlotsPerDay; slot++) {
-            const size_t slotIndex = static_cast<size_t>(compactIndex) * FiveMinuteSlotsPerDay + slot;
-            const uint8_t flags = flagsBySlot[slotIndex];
-            if ((flags & RecordFlagValid) == 0) {
-                continue;
-            }
-
-            const uint32_t yieldWh = yieldBySlot[slotIndex];
-            sampleCount++;
-            if ((flags & RecordFlagReachable) != 0) {
-                record.flags |= RecordFlagReachable;
-            }
-            if ((flags & RecordFlagProducing) != 0) {
-                record.flags |= RecordFlagProducing;
-                runtimeMin += FiveMinuteIntervalSec / 60;
-            }
-            if ((flags & RecordFlagEstimated) != 0) {
-                record.flags |= RecordFlagEstimated;
-            }
-
-            if (yieldWh > maxYieldWh) {
-                maxYieldWh = yieldWh;
-            }
-
-            if (previousValid) {
-                if (yieldWh < previousYieldWh) {
-                    record.flags |= RecordFlagDayResetDetected;
-                } else if (slot > previousSlot && yieldWh > previousYieldWh) {
-                    const uint32_t deltaWh = yieldWh - previousYieldWh;
-                    const uint32_t deltaSec = static_cast<uint32_t>(slot - previousSlot) * FiveMinuteIntervalSec;
-                    const uint32_t powerW = (deltaWh * 3600U + deltaSec / 2U) / deltaSec;
-                    if (powerW > maxPowerW) {
-                        maxPowerW = powerW;
-                    }
-                }
-            }
-
-            previousSlot = slot;
-            previousYieldWh = yieldWh;
-            previousValid = true;
+        if (buildDayRecordFromFiveMinute(targetType, serial, year, recordMonth, recordDay, record)) {
+            records[recordCount] = record;
+            recordCount++;
+        } else {
+            ok = false;
         }
 
-        if (sampleCount == 0) {
-            continue;
+        FiveMinuteRecord samples[FiveMinuteSlotsPerDay];
+        uint16_t sampleCount = 0;
+        ScanResult dayScan;
+        if (queryFiveMinuteDay(targetType, serial, year, recordMonth, recordDay, samples, FiveMinuteSlotsPerDay, sampleCount, dayScan)) {
+            mergeScan(result, dayScan);
         }
-
-        record.yieldWh = maxYieldWh;
-        record.maxPowerW = saturateUint16(maxPowerW);
-        record.runtimeMin = saturateUint16(runtimeMin);
-        record.sampleCount = sampleCount;
-        record.avgPowerW = averagePowerW(record.yieldWh, record.runtimeMin);
-        record.flags |= RecordFlagValid;
-        records[recordCount] = record;
-        recordCount++;
     }
 
-    return true;
+    return ok || recordCount > 0;
 }
 
 bool EnergyHistoryClass::buildDayRecordFromFiveMinute(const TargetType targetType, const uint64_t serial, const uint16_t year, const uint8_t month, const uint8_t day, DayRecord& record)
@@ -2481,86 +2547,11 @@ bool EnergyHistoryClass::buildDayRecordFromFiveMinute(const TargetType targetTyp
         return false;
     }
 
-    FileHeader header;
-    if (!makeFileHeader(FileType::FiveMinute, targetType, serial, year, month, header)) {
+    FiveMinuteRecord samples[FiveMinuteSlotsPerDay];
+    uint16_t sampleCount = 0;
+    ScanResult scan;
+    if (!queryFiveMinuteDay(targetType, serial, year, month, day, samples, FiveMinuteSlotsPerDay, sampleCount, scan) || sampleCount == 0) {
         return false;
-    }
-
-    const String path = makeFiveMinutePath(targetType, serial, year, month);
-    if (path.isEmpty()) {
-        return false;
-    }
-
-    File file = LittleFS.open(path.c_str(), "r", false);
-    if (!file || file.size() < FileHeaderSize || !readValidatedFileHeader(file, header)) {
-        return false;
-    }
-
-    const size_t fileSize = file.size();
-    std::unique_ptr<bool[]> slotsPresent(new (std::nothrow) bool[FiveMinuteSlotsPerDay]());
-    std::unique_ptr<FiveMinuteRecord[]> slots(new (std::nothrow) FiveMinuteRecord[FiveMinuteSlotsPerDay]());
-    if (!slotsPresent || !slots) {
-        return false;
-    }
-
-    while (file.available() > 0) {
-        const size_t remaining = fileSize - file.position();
-        if (remaining < BlockHeaderSize) {
-            break;
-        }
-
-        uint8_t encodedBlockHeader[BlockHeaderSize];
-        if (!readFull(file, encodedBlockHeader, sizeof(encodedBlockHeader))) {
-            break;
-        }
-
-        BlockHeader blockHeader;
-        if (!decodeBlockHeader(encodedBlockHeader, sizeof(encodedBlockHeader), blockHeader)
-                || blockHeader.recordCount == 0
-                || blockHeader.payloadSize == 0
-                || blockHeader.payloadSize != blockHeader.recordCount * FiveMinuteRecordSize
-                || fileSize - file.position() < blockHeader.payloadSize) {
-            break;
-        }
-
-        const size_t payloadStart = file.position();
-        uint32_t crc = 0xffffffff;
-        uint16_t bytesRemaining = blockHeader.payloadSize;
-        uint8_t buffer[FileReadBufferSize];
-        while (bytesRemaining > 0) {
-            const size_t chunkSize = bytesRemaining < sizeof(buffer) ? bytesRemaining : sizeof(buffer);
-            if (!readFull(file, buffer, chunkSize)) {
-                return false;
-            }
-
-            crc = updateCrc32(crc, buffer, chunkSize);
-            bytesRemaining -= chunkSize;
-        }
-
-        if (blockHeader.crc32Payload != finalizeCrc32(crc)) {
-            continue;
-        }
-
-        if (!file.seek(payloadStart)) {
-            return false;
-        }
-
-        for (uint16_t i = 0; i < blockHeader.recordCount; i++) {
-            uint8_t encodedRecord[FiveMinuteRecordSize];
-            if (!readFull(file, encodedRecord, sizeof(encodedRecord))) {
-                return false;
-            }
-
-            FiveMinuteRecord sample;
-            if (!decodeFiveMinuteRecord(encodedRecord, sizeof(encodedRecord), sample)
-                    || sample.day != day
-                    || (sample.flags & RecordFlagValid) == 0) {
-                continue;
-            }
-
-            slots[sample.slot] = sample;
-            slotsPresent[sample.slot] = true;
-        }
     }
 
     std::memset(&record, 0, sizeof(record));
@@ -2568,18 +2559,17 @@ bool EnergyHistoryClass::buildDayRecordFromFiveMinute(const TargetType targetTyp
     uint32_t maxYieldWh = 0;
     uint32_t maxPowerW = 0;
     uint32_t runtimeMin = 0;
-    uint16_t sampleCount = 0;
     uint16_t previousSlot = 0;
     uint32_t previousYieldWh = 0;
     bool previousValid = false;
 
-    for (uint16_t slot = 0; slot < FiveMinuteSlotsPerDay; slot++) {
-        if (!slotsPresent[slot]) {
+    for (uint16_t i = 0; i < sampleCount; i++) {
+        const FiveMinuteRecord& sample = samples[i];
+        if ((sample.flags & RecordFlagValid) == 0) {
             continue;
         }
 
-        const FiveMinuteRecord& sample = slots[slot];
-        sampleCount++;
+        record.sampleCount++;
         if ((sample.flags & RecordFlagReachable) != 0) {
             record.flags |= RecordFlagReachable;
         }
@@ -2598,9 +2588,9 @@ bool EnergyHistoryClass::buildDayRecordFromFiveMinute(const TargetType targetTyp
         if (previousValid) {
             if (sample.yieldDayWh < previousYieldWh) {
                 record.flags |= RecordFlagDayResetDetected;
-            } else if (slot > previousSlot && sample.yieldDayWh > previousYieldWh) {
+            } else if (sample.slot > previousSlot && sample.yieldDayWh > previousYieldWh) {
                 const uint32_t deltaWh = sample.yieldDayWh - previousYieldWh;
-                const uint32_t deltaSec = static_cast<uint32_t>(slot - previousSlot) * FiveMinuteIntervalSec;
+                const uint32_t deltaSec = static_cast<uint32_t>(sample.slot - previousSlot) * FiveMinuteIntervalSec;
                 const uint32_t powerW = (deltaWh * 3600U + deltaSec / 2U) / deltaSec;
                 if (powerW > maxPowerW) {
                     maxPowerW = powerW;
@@ -2608,19 +2598,18 @@ bool EnergyHistoryClass::buildDayRecordFromFiveMinute(const TargetType targetTyp
             }
         }
 
-        previousSlot = slot;
+        previousSlot = sample.slot;
         previousYieldWh = sample.yieldDayWh;
         previousValid = true;
     }
 
-    if (sampleCount == 0) {
+    if (record.sampleCount == 0) {
         return false;
     }
 
     record.yieldWh = maxYieldWh;
     record.maxPowerW = saturateUint16(maxPowerW);
     record.runtimeMin = saturateUint16(runtimeMin);
-    record.sampleCount = sampleCount;
     record.avgPowerW = averagePowerW(record.yieldWh, record.runtimeMin);
     record.flags |= RecordFlagValid;
     return true;
