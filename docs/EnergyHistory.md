@@ -38,14 +38,23 @@ names, so history survives renames.
 
 ## File Names
 
-Five-minute data is stored in monthly files:
+Five-minute data is stored in monthly EH02 files:
 
 ```text
-/energy/5m/total_YYYY_MM.eh2       current compact 5m format
+/energy/5m/total_YYYY_MM.eh2
 /energy/5m/inv_<serial>_YYYY_MM.eh2
-/energy/5m/total_YYYY_MM.eh5       legacy block format, still readable
+```
+
+Legacy EH01 five-minute files may still exist after older firmware versions or
+imports:
+
+```text
+/energy/5m/total_YYYY_MM.eh5
 /energy/5m/inv_<serial>_YYYY_MM.eh5
 ```
+
+New writes and visualization use `.eh2` only. `.eh5` is kept only for migration,
+file management, scanning/recovery, download, upload, or deletion.
 
 Daily data is stored in yearly files:
 
@@ -206,9 +215,11 @@ Persistence interval:
 ```
 
 New five-minute data is appended as EH02 compact records without per-sample
-block headers. Legacy EH01 five-minute block files remain readable. The API
-deduplicates by `day + slot` when repeated writes occur; the last valid record
-wins. This avoids in-place rewrites and keeps flash wear low.
+block headers. Runtime and visualization paths use EH02 `.eh2` files only. The
+legacy EH01 `.eh5` block format remains available for migration and file
+management, but it is not used for normal 5-minute queries. The API deduplicates
+by `day + slot` when repeated writes occur; the last valid record wins. This
+avoids in-place rewrites and keeps flash wear low.
 
 Runtime five-minute samples are written only during the configured day period
 from `SunPosition`. If sunrise/sunset calculation is unavailable, sampling
@@ -225,9 +236,9 @@ Daily and monthly aggregates should be append/update-log style where practical.
 If duplicate aggregate records exist, the last valid record for the same key
 wins.
 
-Append blocks are intentionally small. Five-minute runtime writes append one
-record per block. Day and month aggregate writers support up to four records per
-block.
+Append blocks are intentionally small for aggregate files. EH02 five-minute
+runtime writes append one compact record directly. Day and month aggregate
+writers support up to four records per block.
 
 Daily aggregates are derived from valid five-minute samples for the completed
 local day. `yieldWh` is the highest daily yield seen for the day. `maxPowerW` is
@@ -299,8 +310,10 @@ the same key, the last valid record wins. Five-minute visualization uses compact
 manual deletion.
 
 Day queries first read persisted day records. Missing requested days are rebuilt
-from the corresponding five-minute month file when possible, returned to the
-caller, and persisted back into the day file in append blocks.
+from the corresponding EH02 five-minute month file when possible, returned to
+the caller, and persisted back into the day file in append blocks. For one
+query range, each required five-minute month file is read once and then reused
+to derive all missing days in that month.
 
 Month queries first read persisted month records. Missing requested months are
 rebuilt from day records when possible. A month query rebuilds at most one
@@ -452,10 +465,13 @@ files[].path
 files[].size
 ```
 
-Temporary upload files ending in `.upload` are filtered out of the list.
+Temporary upload/migration/backup files ending in `.upload`, `.migrate`, or
+`.backup` are filtered out of the list.
 
 The file list recursively enumerates `/energy/`, while status/recovery operate
 on the known `/energy/5m`, `/energy/day`, and `/energy/month` directories.
+Because this endpoint walks LittleFS directories, the UI should avoid calling it
+on hot paths unless file-management data or period target discovery is needed.
 
 Deep-scan one managed file:
 
@@ -491,9 +507,20 @@ POST /api/energy/history/file/upload?file=/energy/5m/total_YYYY_MM.eh2
 Uploads are first written to `<target>.upload` and then renamed over the target
 path when the upload finishes.
 
-File imports, deletes, and completed uploads call `markFilesChanged()`, which
-updates both revision counters. Downloads and read-only scans do not change
-revisions.
+Migrate one legacy EH01 five-minute file to EH02:
+
+```text
+POST /api/energy/history/file/migrate-v2?file=/energy/5m/inv_<serial>_YYYY_MM.eh5
+POST /api/energy/history/file/migrate-v2?file=/energy/5m/inv_<serial>_YYYY_MM.eh5&overwrite=1
+```
+
+Migration writes `<target>.eh2.migrate`, validates the result, and then renames
+it to `.eh2`. Existing `.eh2` files are kept unless `overwrite=1` is supplied.
+The source `.eh5` is not deleted automatically.
+
+File imports, deletes, completed uploads, successful migrations, and recovery
+operations call `markFilesChanged()`, which updates both revision counters.
+Downloads and read-only scans do not change revisions.
 
 ## Web UI
 
@@ -503,10 +530,11 @@ data, file imports, recovery, or deletes change the backend state. Inverter
 target IDs are built from the configured hexadecimal serial converted to the
 decimal `inv_<serial>` form used by the backend.
 
-The view also reads the managed file list and adds up to 32 additional inverter
+The view can read the managed file list and add up to 32 additional inverter
 targets found in matching history files for the selected period. This allows
 imported or old inverter history to remain visible even when the inverter is no
-longer configured.
+longer configured. For five-minute periods, only `.eh2` files participate in
+this target discovery.
 
 Available query views:
 
@@ -526,7 +554,9 @@ unexpected reloads of the wider view.
 
 A secondary daily-energy chart is loaded for inverter targets for the currently
 selected month. It can render inverter energy stacked or as separate bars. The
-chart has its own month navigation and can be opened to drill down into a day.
+chart appears as soon as the first inverter series has data and is updated
+progressively as the remaining inverter series finish loading. The chart has
+its own month navigation and can be opened to drill down into a day.
 
 The comparison area can load the available years from managed `total` 5m, day,
 or month files and render a month-by-month yearly comparison, a yearly total
@@ -558,13 +588,14 @@ Cleanup is allowed to delete only old per-inverter five-minute files:
 
 ```text
 /energy/5m/inv_<serial>_YYYY_MM.eh2
-/energy/5m/inv_<serial>_YYYY_MM.eh5
+/energy/5m/inv_<serial>_YYYY_MM.eh5   legacy, if still present
 ```
 
 Cleanup rules:
 
 1. Delete the oldest per-inverter five-minute files first.
-2. Do not delete `/energy/5m/total_YYYY_MM.eh2` or `/energy/5m/total_YYYY_MM.eh5`.
+2. Do not delete `/energy/5m/total_YYYY_MM.eh2` or legacy
+   `/energy/5m/total_YYYY_MM.eh5` files.
 3. Do not delete day or month aggregate files.
 4. Ignore unrecognized file names and unrelated LittleFS files.
 
