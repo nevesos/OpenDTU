@@ -781,7 +781,7 @@ export default defineComponent({
             }
 
             (newData.inverters || []).forEach((updatedInverter) => {
-                if (signalUpdates) {
+                if (signalUpdates && updatedInverter.stats_updated === true) {
                     this.signalInverterUpdate(updatedInverter.serial);
                 }
 

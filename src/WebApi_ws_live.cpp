@@ -87,7 +87,9 @@ void WebApiWsLiveClass::sendDataTaskCb()
         }
 
         const uint32_t lastUpdateInternal = inv->Statistics()->getLastUpdateFromInternal();
-        if (!((lastUpdateInternal > 0 && lastUpdateInternal > _lastPublishStats[i]) || (millis() - _lastPublishStats[i] > (10 * 1000)))) {
+        const bool statsUpdated = lastUpdateInternal > 0 && lastUpdateInternal > _lastPublishStats[i];
+        const bool refreshDue = millis() - _lastPublishStats[i] > (10 * 1000);
+        if (!(statsUpdated || refreshDue)) {
             continue;
         }
 
@@ -103,6 +105,7 @@ void WebApiWsLiveClass::sendDataTaskCb()
 
             generateCommonJsonResponse(var);
             generateInverterCommonJsonResponse(invObject, inv);
+            invObject["stats_updated"] = statsUpdated;
             generateInverterChannelJsonResponse(invObject, inv);
 
             if (!Utils::checkJsonAlloc(root, __FUNCTION__, __LINE__)) {

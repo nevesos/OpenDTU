@@ -40,6 +40,7 @@ export interface Inverter {
     poll_enabled: boolean;
     reachable: boolean;
     producing: boolean;
+    stats_updated?: boolean;
     limit_relative: number;
     limit_absolute: number;
     events: number;
